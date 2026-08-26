@@ -1530,7 +1530,14 @@ function clearLocalUsageData() {
 // depois).
 async function getMyPatientUserIds() {
     if (!supabaseClient || !currentUserId) return [];
-    const { data, error } = await supabaseClient.from('patients').select('user_id').eq('doctor_user_id', currentUserId);
+    // Inclui pacientes dos colegas da mesma empresa (mesmo raciocínio de
+    // doctorBankOrFilter) — sem isso, um médico via só o próprio uso na aba
+    // Uso e Insights mesmo já enxergando o paciente inteiro em Meus Pacientes.
+    let query = supabaseClient.from('patients').select('user_id');
+    query = currentUserCompanyId
+        ? query.or(`doctor_user_id.eq.${currentUserId},company_id.eq.${currentUserCompanyId}`)
+        : query.eq('doctor_user_id', currentUserId);
+    const { data, error } = await query;
     if (error) { console.warn('Erro ao buscar pacientes do médico:', error.message); return []; }
     return (data || []).map(p => p.user_id).filter(Boolean);
 }
