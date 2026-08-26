@@ -181,6 +181,118 @@ async function uploadToSupabaseStorage(bucket, path, file) {
     return publicUrlData?.publicUrl || null;
 }
 
+// Editor de "Palavra Escrita" do Exercício de Sílabas e do Exercício com
+// Áudio Real (negrito/cor por trecho, ver createSyllablesItemBlockHtml e
+// createAudioItemBlockHtml) — o campo é um contenteditable, então o que sai
+// dele é HTML de verdade, não texto puro. sanitizeWordHtml reconstrói esse
+// HTML do zero permitindo só <strong> e <span style="color:..."> aninhados
+// em texto, descartando qualquer outra tag/atributo — nunca confia que o
+// HTML já salvo (banco, ou o que o execCommand produziu) está limpo, porque
+// isso volta a ser injetado via innerHTML no player (renderCurrentPlaylistItem).
+function sanitizeWordHtml(html) {
+    if (!html) return '';
+    const safeColor = /^(#[0-9a-fA-F]{3,8}|rgba?\([\d.,\s%]+\)|[a-zA-Z]+)$/;
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    const walk = (source, target) => {
+        source.childNodes.forEach(child => {
+            if (child.nodeType === Node.TEXT_NODE) {
+                target.appendChild(document.createTextNode(child.textContent));
+            } else if (child.nodeType === Node.ELEMENT_NODE) {
+                const tag = child.tagName.toLowerCase();
+                if (tag === 'b' || tag === 'strong') {
+                    const strong = document.createElement('strong');
+                    walk(child, strong);
+                    target.appendChild(strong);
+                } else if (tag === 'br') {
+                    target.appendChild(document.createElement('br'));
+                } else {
+                    const color = tag === 'font' ? child.getAttribute('color') : child.style?.color;
+                    if (color && safeColor.test(color.trim())) {
+                        const span = document.createElement('span');
+                        span.style.color = color;
+                        walk(child, span);
+                        target.appendChild(span);
+                    } else {
+                        // Tag não permitida (div, script, etc.): mantém só o conteúdo de dentro.
+                        walk(child, target);
+                    }
+                }
+            }
+        });
+    };
+    const result = document.createElement('div');
+    walk(temp, result);
+    return result.innerHTML;
+}
+
+// Texto puro da palavra (sem negrito/cor) — usado onde HTML não faz sentido:
+// TTS, log de uso, etc. Continua funcionando normal pra palavras sem
+// formatação nenhuma (Exercício com Slides), já que aí é texto puro mesmo.
+function stripWordHtml(html) {
+    if (!html) return '';
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    return temp.textContent || '';
+}
+
+// Liga os botões de Negrito/Cor/Limpar do editor de "Palavra Escrita" a um
+// bloco recém-criado (Exercício de Sílabas e Áudio Real chamam essa mesma
+// função — é só fiação de evento sobre elementos que o caller já montou,
+// sem estado compartilhado entre os dois fluxos). mousedown+preventDefault
+// nos botões de negrito/limpar evita que eles tirem o foco do campo antes do
+// clique (o que colapsaria a seleção de texto); o input de cor não dá pra
+// bloquear assim (perderia o seletor nativo), então guarda a seleção sozinho
+// e restaura na hora de aplicar.
+function wireWordEditorToolbar(blockEl) {
+    const field = blockEl.querySelector('.word-editor-field');
+    const boldBtn = blockEl.querySelector('.word-editor-bold');
+    const colorInput = blockEl.querySelector('.word-editor-color');
+    const clearBtn = blockEl.querySelector('.word-editor-clear');
+    if (!field) return;
+
+    let savedRange = null;
+    const saveSelection = () => {
+        const sel = window.getSelection();
+        if (sel.rangeCount > 0 && field.contains(sel.anchorNode)) {
+            savedRange = sel.getRangeAt(0).cloneRange();
+        }
+    };
+    field.addEventListener('keyup', saveSelection);
+    field.addEventListener('mouseup', saveSelection);
+    colorInput?.addEventListener('mousedown', saveSelection);
+
+    const restoreSelection = () => {
+        if (!savedRange) return false;
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(savedRange);
+        return true;
+    };
+
+    boldBtn?.addEventListener('mousedown', (e) => e.preventDefault());
+    boldBtn?.addEventListener('click', () => {
+        field.focus();
+        document.execCommand('bold');
+    });
+
+    colorInput?.addEventListener('input', () => {
+        field.focus();
+        restoreSelection();
+        document.execCommand('foreColor', false, colorInput.value);
+    });
+
+    clearBtn?.addEventListener('mousedown', (e) => e.preventDefault());
+    clearBtn?.addEventListener('click', () => {
+        field.focus();
+        document.execCommand('selectAll');
+        document.execCommand('removeFormat');
+        // removeFormat tira negrito/cor mas não desfaz o <span>/<font> em
+        // si em todo navegador — normaliza reconstruindo a partir do texto puro.
+        field.textContent = field.textContent;
+    });
+}
+
 let currentMessage = [];
 let currentTypingWord = "";
 let db;
@@ -2935,7 +3047,7 @@ function renderExerciseCards(exercisesArray) {
         } else if (firstItem && firstItem.image_url) {
             imgContainer.innerHTML = `<img src="${firstItem.image_url}" class="word-btn-img" alt="" />`;
         } else if (firstItem && (firstItem.syllables || firstItem.word)) {
-            const displaySyllables = (firstItem.syllables || firstItem.word).replace(/[-.]/g, '.​');
+            const displaySyllables = (firstItem.syllables || stripWordHtml(firstItem.word)).replace(/[-.]/g, '.​');
             const previewEl = document.createElement('span');
             previewEl.className = 'word-btn-syllables-preview';
             previewEl.textContent = displaySyllables;
@@ -3247,7 +3359,12 @@ function createSyllablesItemBlockHtml(blockId, isEdit = false) {
             </div>
             <div class="form-group">
                 <label>Palavra Escrita</label>
-                <input type="text" class="syll-item-word" placeholder="Ex: casa" required>
+                <div class="word-editor-toolbar">
+                    <button type="button" class="word-editor-btn word-editor-bold" title="Negrito na seleção"><i class="fas fa-bold" aria-hidden="true"></i></button>
+                    <input type="color" class="word-editor-color" title="Cor na seleção" value="#e63946">
+                    <button type="button" class="word-editor-btn word-editor-clear" title="Limpar formatação">Limpar</button>
+                </div>
+                <div class="syll-item-word word-editor-field" contenteditable="true" data-placeholder="Ex: casa" role="textbox" aria-label="Palavra escrita"></div>
             </div>
             <div class="form-group">
                 <label>Sílabas</label>
@@ -3272,6 +3389,7 @@ function addSyllablesItemBlock(isEdit = false) {
             updateSyllablesBlockTitles();
         });
     }
+    wireWordEditorToolbar(blockEl);
 
     container.appendChild(blockEl);
     updateSyllablesBlockTitles();
@@ -3298,7 +3416,12 @@ function createAudioItemBlockHtml(blockId, isEdit = false, hasExistingAudio = fa
             </div>
             <div class="form-group">
                 <label>Palavra Escrita</label>
-                <input type="text" class="audio-item-word" placeholder="Ex: casa" required>
+                <div class="word-editor-toolbar">
+                    <button type="button" class="word-editor-btn word-editor-bold" title="Negrito na seleção"><i class="fas fa-bold" aria-hidden="true"></i></button>
+                    <input type="color" class="word-editor-color" title="Cor na seleção" value="#e63946">
+                    <button type="button" class="word-editor-btn word-editor-clear" title="Limpar formatação">Limpar</button>
+                </div>
+                <div class="audio-item-word word-editor-field" contenteditable="true" data-placeholder="Ex: casa" role="textbox" aria-label="Palavra escrita"></div>
             </div>
             <div class="form-group">
                 <label>Sílabas</label>
@@ -3338,6 +3461,7 @@ function addAudioItemBlock(isEdit = false, hasExistingAudio = false, hasExisting
             updateAudioBlockTitles();
         });
     }
+    wireWordEditorToolbar(blockEl);
     // Trocar o arquivo esconde o aviso de "já salvo" — a nova escolha é o
     // que vai valer no submit (ver handler do formulário).
     blockEl.querySelector('.audio-item-file').addEventListener('change', (e) => {
@@ -3391,7 +3515,7 @@ function openEditAudioExercise(ex) {
         const hasExistingImage = !!item.image_url || item.imageBlob instanceof Blob;
         addAudioItemBlock(true, hasExistingAudio, hasExistingImage);
         const blockEl = container.querySelector(`[data-block-id="${index}"]`);
-        blockEl.querySelector('.audio-item-word').value = item.word || '';
+        blockEl.querySelector('.audio-item-word').innerHTML = sanitizeWordHtml(item.word || '');
         blockEl.querySelector('.audio-item-syllables').value = item.syllables || '';
         if (item.audio_url) currentEditingAudioUrls[index] = item.audio_url;
         if (item.image_url) currentEditingAudioImageUrls[index] = item.image_url;
@@ -3478,7 +3602,7 @@ function openEditSyllablesExercise(ex) {
     ex.items.forEach((item, index) => {
         addSyllablesItemBlock(true);
         const blockEl = container.querySelector(`[data-block-id="${index}"]`);
-        blockEl.querySelector('.syll-item-word').value = item.word || '';
+        blockEl.querySelector('.syll-item-word').innerHTML = sanitizeWordHtml(item.word || '');
         blockEl.querySelector('.syll-item-syllables').value = item.syllables || '';
     });
 }
@@ -4143,12 +4267,16 @@ function setupModals() {
         if (blocks.length === 0) return alert("Adicione pelo menos uma palavra.");
 
         const itemsArray = [];
+        let missingWord = false;
         blocks.forEach(block => {
+            const wordHtml = sanitizeWordHtml(block.querySelector('.syll-item-word').innerHTML);
+            if (!stripWordHtml(wordHtml).trim()) missingWord = true;
             itemsArray.push({
-                word: block.querySelector('.syll-item-word').value,
+                word: wordHtml,
                 syllables: block.querySelector('.syll-item-syllables').value
             });
         });
+        if (missingWord) return alert("Toda palavra deste exercício precisa do campo \"Palavra Escrita\" preenchido.");
 
         const targetDoctorUserId = isDoctor ? currentUserId : null;
         saveSyllablesExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, itemsArray, targetDoctorUserId);
@@ -4199,6 +4327,7 @@ function setupModals() {
 
         const itemsArray = [];
         let missingAudio = false;
+        let missingWord = false;
         blocks.forEach(block => {
             const blockId = block.dataset.blockId;
             const audioFile = block.querySelector('.audio-item-file').files[0] || null;
@@ -4206,8 +4335,10 @@ function setupModals() {
             if (!audioFile && !audioUrl) missingAudio = true;
             const imageFile = block.querySelector('.audio-item-image').files[0] || null;
             const imageUrl = !imageFile ? (currentEditingAudioImageUrls[blockId] || null) : null;
+            const wordHtml = sanitizeWordHtml(block.querySelector('.audio-item-word').innerHTML);
+            if (!stripWordHtml(wordHtml).trim()) missingWord = true;
             itemsArray.push({
-                word: block.querySelector('.audio-item-word').value,
+                word: wordHtml,
                 syllables: block.querySelector('.audio-item-syllables').value,
                 audioFile,
                 audioUrl,
@@ -4215,6 +4346,7 @@ function setupModals() {
                 imageUrl
             });
         });
+        if (missingWord) return alert("Toda palavra deste exercício precisa do campo \"Palavra Escrita\" preenchido.");
         if (missingAudio) return alert("Toda palavra deste exercício precisa de um áudio gravado (.mp3 ou .wav).");
 
         const targetDoctorUserId = isDoctor ? currentUserId : null;
@@ -4256,7 +4388,7 @@ function setupModals() {
             trackUsageActivity(usageCurrentActivity?.label || 'Exercício', {
                 key: `exercise:speak:${usageCurrentActivity?.label || 'Exercício'}`,
                 group: 'Exercícios',
-                detail: `Ouviu palavra: ${item.word}`
+                detail: `Ouviu palavra: ${stripWordHtml(item.word)}`
             });
             // Exercício com Áudio Real: toca a gravação de verdade em vez da
             // voz sintética, quando o item tem uma (mesmo padrão já usado
@@ -4271,7 +4403,7 @@ function setupModals() {
                 currentAudio = new Audio(item.audio_url);
                 currentAudio.play();
             } else {
-                speakWithAzure(item.word);
+                speakWithAzure(stripWordHtml(item.word));
             }
         }
     });
@@ -4361,7 +4493,10 @@ function renderCurrentPlaylistItem() {
 
         document.getElementById('presentation-progress').textContent = `${currentPlaylistIndex + 1} / ${currentPlaylistItems.length}`;
         const wordEl = document.getElementById('presentation-word-text');
-        wordEl.textContent = item.word || '';
+        // sanitizeWordHtml reconstrói só <strong>/<span style="color:..."> permitidos
+        // (Exercício de Sílabas e Áudio Real, negrito/cor por trecho); pra palavra
+        // sem nenhuma formatação (Exercício com Slides) isso equivale a texto puro.
+        wordEl.innerHTML = sanitizeWordHtml(item.word || '');
         wordEl.style.color = item.textColor || '#333333';
         wordEl.style.fontSize = (item.textSize || '100') + 'px';
         wordEl.style.textTransform = item.isUppercase ? 'uppercase' : 'none';
@@ -4397,6 +4532,10 @@ function renderCurrentPlaylistItem() {
                 el.style.color = color || '#1f1f1f';
                 el.style.fontSize = (size || 100) + 'px';
             });
+            // Palavra com negrito manual só num trecho: o resto vira peso normal
+            // pra esse trecho se destacar de verdade (sem formatação nenhuma,
+            // mantém o negrito padrão do deck, setado ali em cima).
+            if (/<(strong|span)/i.test(item.word || '')) wordEl.style.fontWeight = '400';
             fitTextToWidth(syllablesEl, syllablesEl.parentElement, 16, 110);
         } else {
             syllablesEl.style.display = 'none';
@@ -4460,9 +4599,9 @@ function renderCurrentPlaylistItem() {
         // áudio real próprio (Exercício com Áudio Real) não precisam de TTS —
         // pré-carregar a voz da Azure ali seria uma chamada de API à toa.
         const hasOwnAudio = (it) => it.audioBlob instanceof Blob || !!it.audio_url;
-        if (!embedUrl && !hasOwnAudio(item)) prefetchTts(item.word);
+        if (!embedUrl && !hasOwnAudio(item)) prefetchTts(stripWordHtml(item.word));
         const nextItem = currentPlaylistItems[currentPlaylistIndex + 1];
-        if (nextItem && !getEmbedUrl(nextItem.videoLink) && !hasOwnAudio(nextItem)) prefetchTts(nextItem.word);
+        if (nextItem && !getEmbedUrl(nextItem.videoLink) && !hasOwnAudio(nextItem)) prefetchTts(stripWordHtml(nextItem.word));
 
         // Pré-carrega a imagem dos slides vizinhos: sem isso, cada avanço só
         // começa a buscar a imagem depois do clique, e em decks grandes

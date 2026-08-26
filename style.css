@@ -296,6 +296,19 @@ body {
 .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 30px; }
 .btn-primary { background: #2196F3; border: none; color: white; padding: 12px 24px; border-radius: 4px; font-size: 16px; font-weight: bold; cursor: pointer; }
 .btn-secondary { background: #9E9E9E; border: none; color: white; padding: 12px 24px; border-radius: 4px; font-size: 16px; font-weight: bold; cursor: pointer; }
+/* Editor de "Palavra Escrita" (Exercício de Sílabas e Áudio Real) — negrito e
+   cor por trecho selecionado, ver sanitizeWordHtml/stripWordHtml em app.js. */
+.word-editor-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.word-editor-btn { background: #f0f0f0; border: 1px solid #ddd; border-radius: 6px; width: 32px; height: 32px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; color: #333; }
+.word-editor-btn:hover { background: #e4e4e4; }
+.word-editor-btn.word-editor-clear { width: auto; padding: 0 10px; font-size: 12px; }
+.word-editor-toolbar input[type="color"].word-editor-color { width: 32px; height: 32px; padding: 2px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; background: white; }
+.word-editor-toolbar input[type="color"].word-editor-color::-webkit-color-swatch-wrapper { padding: 2px; }
+.word-editor-toolbar input[type="color"].word-editor-color::-webkit-color-swatch { border: none; border-radius: 3px; }
+.word-editor-field { width: 100%; min-height: 44px; box-sizing: border-box; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; font-family: inherit; outline: none; }
+.word-editor-field:focus { border-color: #2196F3; }
+.word-editor-field:empty:before { content: attr(data-placeholder); color: #999; }
+.word-editor-field strong, #presentation-word-text strong { font-weight: 800; }
 .exercise-type-modal-content { max-width: 720px; }
 .exercise-type-hint { margin: 0 0 20px; color: #666; }
 .exercise-type-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
