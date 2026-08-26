@@ -236,19 +236,30 @@ function stripWordHtml(html) {
     return temp.textContent || '';
 }
 
-// Liga os botões de Negrito/Cor/Limpar do editor de "Palavra Escrita" a um
-// bloco recém-criado (Exercício de Sílabas e Áudio Real chamam essa mesma
-// função — é só fiação de evento sobre elementos que o caller já montou,
-// sem estado compartilhado entre os dois fluxos). mousedown+preventDefault
-// nos botões de negrito/limpar evita que eles tirem o foco do campo antes do
-// clique (o que colapsaria a seleção de texto); o input de cor não dá pra
-// bloquear assim (perderia o seletor nativo), então guarda a seleção sozinho
-// e restaura na hora de aplicar.
-function wireWordEditorToolbar(blockEl) {
-    const field = blockEl.querySelector('.word-editor-field');
-    const boldBtn = blockEl.querySelector('.word-editor-bold');
-    const colorInput = blockEl.querySelector('.word-editor-color');
-    const clearBtn = blockEl.querySelector('.word-editor-clear');
+// Um bloco de palavra pode ter mais de um editor rico (Palavra Escrita e
+// Sílabas, cada um com seu próprio toolbar) — liga cada um pelo seu
+// .form-group, senão wireWordEditorToolbar acharia sempre o primeiro campo
+// do bloco pros dois toolbars.
+function wireAllWordEditors(blockEl) {
+    blockEl.querySelectorAll('.word-editor-field').forEach(field => {
+        const group = field.closest('.form-group');
+        if (group) wireWordEditorToolbar(group);
+    });
+}
+
+// Liga os botões de Negrito/Cor/Limpar de UM editor (escopado ao seu
+// .form-group) — Exercício de Sílabas e Áudio Real chamam essa mesma função
+// pra cada campo rico que têm, via wireAllWordEditors; é só fiação de evento
+// sobre elementos que o caller já montou, sem estado compartilhado entre os
+// fluxos. mousedown+preventDefault nos botões de negrito/limpar evita que
+// eles tirem o foco do campo antes do clique (o que colapsaria a seleção de
+// texto); o input de cor não dá pra bloquear assim (perderia o seletor
+// nativo), então guarda a seleção sozinho e restaura na hora de aplicar.
+function wireWordEditorToolbar(container) {
+    const field = container.querySelector('.word-editor-field');
+    const boldBtn = container.querySelector('.word-editor-bold');
+    const colorInput = container.querySelector('.word-editor-color');
+    const clearBtn = container.querySelector('.word-editor-clear');
     if (!field) return;
 
     let savedRange = null;
@@ -3050,9 +3061,12 @@ function renderExerciseCards(exercisesArray) {
             const displaySyllables = (firstItem.syllables || stripWordHtml(firstItem.word)).replace(/[-.]/g, '.​');
             const previewEl = document.createElement('span');
             previewEl.className = 'word-btn-syllables-preview';
-            previewEl.textContent = displaySyllables;
+            previewEl.innerHTML = sanitizeWordHtml(displaySyllables);
             previewEl.style.fontFamily = ex.syllablesFont || "'Outfit', sans-serif";
             previewEl.style.color = ex.syllablesColor || '#1f1f1f';
+            // Mesmo contraste do player: negrito manual só num trecho vira peso
+            // normal no resto, senão fica indistinguível do 800 padrão do card.
+            if (/<(strong|span)/i.test(displaySyllables)) previewEl.style.fontWeight = '400';
             imgContainer.appendChild(previewEl);
         } else {
             imgContainer.innerHTML = '<i class="fas fa-folder word-btn-icon" aria-hidden="true"></i>';
@@ -3368,7 +3382,12 @@ function createSyllablesItemBlockHtml(blockId, isEdit = false) {
             </div>
             <div class="form-group">
                 <label>Sílabas</label>
-                <input type="text" class="syll-item-syllables" placeholder="Ex: ca-sa" required>
+                <div class="word-editor-toolbar">
+                    <button type="button" class="word-editor-btn word-editor-bold" title="Negrito na seleção"><i class="fas fa-bold" aria-hidden="true"></i></button>
+                    <input type="color" class="word-editor-color" title="Cor na seleção" value="#e63946">
+                    <button type="button" class="word-editor-btn word-editor-clear" title="Limpar formatação">Limpar</button>
+                </div>
+                <div class="syll-item-syllables word-editor-field" contenteditable="true" data-placeholder="Ex: ca-sa" role="textbox" aria-label="Sílabas"></div>
             </div>
         </div>
     `;
@@ -3389,7 +3408,7 @@ function addSyllablesItemBlock(isEdit = false) {
             updateSyllablesBlockTitles();
         });
     }
-    wireWordEditorToolbar(blockEl);
+    wireAllWordEditors(blockEl);
 
     container.appendChild(blockEl);
     updateSyllablesBlockTitles();
@@ -3425,7 +3444,12 @@ function createAudioItemBlockHtml(blockId, isEdit = false, hasExistingAudio = fa
             </div>
             <div class="form-group">
                 <label>Sílabas</label>
-                <input type="text" class="audio-item-syllables" placeholder="Ex: ca-sa" required>
+                <div class="word-editor-toolbar">
+                    <button type="button" class="word-editor-btn word-editor-bold" title="Negrito na seleção"><i class="fas fa-bold" aria-hidden="true"></i></button>
+                    <input type="color" class="word-editor-color" title="Cor na seleção" value="#e63946">
+                    <button type="button" class="word-editor-btn word-editor-clear" title="Limpar formatação">Limpar</button>
+                </div>
+                <div class="audio-item-syllables word-editor-field" contenteditable="true" data-placeholder="Ex: ca-sa" role="textbox" aria-label="Sílabas"></div>
             </div>
             <div class="form-group">
                 <label>Áudio gravado (.mp3 ou .wav)</label>
@@ -3461,7 +3485,7 @@ function addAudioItemBlock(isEdit = false, hasExistingAudio = false, hasExisting
             updateAudioBlockTitles();
         });
     }
-    wireWordEditorToolbar(blockEl);
+    wireAllWordEditors(blockEl);
     // Trocar o arquivo esconde o aviso de "já salvo" — a nova escolha é o
     // que vai valer no submit (ver handler do formulário).
     blockEl.querySelector('.audio-item-file').addEventListener('change', (e) => {
@@ -3516,7 +3540,7 @@ function openEditAudioExercise(ex) {
         addAudioItemBlock(true, hasExistingAudio, hasExistingImage);
         const blockEl = container.querySelector(`[data-block-id="${index}"]`);
         blockEl.querySelector('.audio-item-word').innerHTML = sanitizeWordHtml(item.word || '');
-        blockEl.querySelector('.audio-item-syllables').value = item.syllables || '';
+        blockEl.querySelector('.audio-item-syllables').innerHTML = sanitizeWordHtml(item.syllables || '');
         if (item.audio_url) currentEditingAudioUrls[index] = item.audio_url;
         if (item.image_url) currentEditingAudioImageUrls[index] = item.image_url;
     });
@@ -3603,7 +3627,7 @@ function openEditSyllablesExercise(ex) {
         addSyllablesItemBlock(true);
         const blockEl = container.querySelector(`[data-block-id="${index}"]`);
         blockEl.querySelector('.syll-item-word').innerHTML = sanitizeWordHtml(item.word || '');
-        blockEl.querySelector('.syll-item-syllables').value = item.syllables || '';
+        blockEl.querySelector('.syll-item-syllables').innerHTML = sanitizeWordHtml(item.syllables || '');
     });
 }
 
@@ -4268,15 +4292,19 @@ function setupModals() {
 
         const itemsArray = [];
         let missingWord = false;
+        let missingSyllables = false;
         blocks.forEach(block => {
             const wordHtml = sanitizeWordHtml(block.querySelector('.syll-item-word').innerHTML);
             if (!stripWordHtml(wordHtml).trim()) missingWord = true;
+            const syllablesHtml = sanitizeWordHtml(block.querySelector('.syll-item-syllables').innerHTML);
+            if (!stripWordHtml(syllablesHtml).trim()) missingSyllables = true;
             itemsArray.push({
                 word: wordHtml,
-                syllables: block.querySelector('.syll-item-syllables').value
+                syllables: syllablesHtml
             });
         });
         if (missingWord) return alert("Toda palavra deste exercício precisa do campo \"Palavra Escrita\" preenchido.");
+        if (missingSyllables) return alert("Toda palavra deste exercício precisa do campo \"Sílabas\" preenchido.");
 
         const targetDoctorUserId = isDoctor ? currentUserId : null;
         saveSyllablesExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, itemsArray, targetDoctorUserId);
@@ -4328,6 +4356,7 @@ function setupModals() {
         const itemsArray = [];
         let missingAudio = false;
         let missingWord = false;
+        let missingSyllables = false;
         blocks.forEach(block => {
             const blockId = block.dataset.blockId;
             const audioFile = block.querySelector('.audio-item-file').files[0] || null;
@@ -4337,9 +4366,11 @@ function setupModals() {
             const imageUrl = !imageFile ? (currentEditingAudioImageUrls[blockId] || null) : null;
             const wordHtml = sanitizeWordHtml(block.querySelector('.audio-item-word').innerHTML);
             if (!stripWordHtml(wordHtml).trim()) missingWord = true;
+            const syllablesHtml = sanitizeWordHtml(block.querySelector('.audio-item-syllables').innerHTML);
+            if (!stripWordHtml(syllablesHtml).trim()) missingSyllables = true;
             itemsArray.push({
                 word: wordHtml,
-                syllables: block.querySelector('.audio-item-syllables').value,
+                syllables: syllablesHtml,
                 audioFile,
                 audioUrl,
                 imageFile,
@@ -4347,6 +4378,7 @@ function setupModals() {
             });
         });
         if (missingWord) return alert("Toda palavra deste exercício precisa do campo \"Palavra Escrita\" preenchido.");
+        if (missingSyllables) return alert("Toda palavra deste exercício precisa do campo \"Sílabas\" preenchido.");
         if (missingAudio) return alert("Toda palavra deste exercício precisa de um áudio gravado (.mp3 ou .wav).");
 
         const targetDoctorUserId = isDoctor ? currentUserId : null;
@@ -4525,17 +4557,21 @@ function renderCurrentPlaylistItem() {
             imgEl.src = '';
             captionEl.style.display = 'none';
             syllablesEl.style.display = 'inline-block';
-            syllablesEl.textContent = displaySyllables;
+            syllablesEl.innerHTML = sanitizeWordHtml(displaySyllables);
             const { size, color, font } = currentPlaylistDeckStyle;
             [wordEl, syllablesEl].forEach(el => {
                 el.style.fontFamily = font || "'Outfit', sans-serif";
                 el.style.color = color || '#1f1f1f';
                 el.style.fontSize = (size || 100) + 'px';
             });
-            // Palavra com negrito manual só num trecho: o resto vira peso normal
-            // pra esse trecho se destacar de verdade (sem formatação nenhuma,
-            // mantém o negrito padrão do deck, setado ali em cima).
+            // Palavra/sílabas com negrito manual só num trecho: o resto vira peso
+            // normal pra esse trecho se destacar de verdade (sem formatação
+            // nenhuma, mantém o negrito padrão do deck, no CSS de .presentation-syllables).
+            // Reset explícito nos dois casos — os elementos são reaproveitados
+            // entre slides, então sem isso um peso '400' de um item formatado
+            // ficava grudado no próximo item sem formatação nenhuma.
             if (/<(strong|span)/i.test(item.word || '')) wordEl.style.fontWeight = '400';
+            syllablesEl.style.fontWeight = /<(strong|span)/i.test(item.syllables || '') ? '400' : '';
             fitTextToWidth(syllablesEl, syllablesEl.parentElement, 16, 110);
         } else {
             syllablesEl.style.display = 'none';
