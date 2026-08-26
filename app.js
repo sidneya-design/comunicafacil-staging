@@ -2456,6 +2456,73 @@ async function saveSyllablesExerciseToDB(title, size, color, font, itemsArray, d
     }
 }
 
+// Exercício com Áudio Real: mesmo formato do de Sílabas (game_kind próprio,
+// dbItems próprios), mas cada item carrega um audio_url (upload em
+// media_uploads/audios) que renderCurrentPlaylistItem/btn-speak-presentation
+// tocam no lugar da voz sintética da Azure quando presente.
+let currentEditingAudioExerciseId = null;
+let currentEditingAudioExerciseFromSupabase = false;
+
+async function saveAudioExerciseToDB(title, size, color, font, itemsArray, doctorUserId = null) {
+    // Sobe (ou reaproveita, se o item não trocou o arquivo na edição) o áudio
+    // de cada palavra antes de gravar os itens — mesmo padrão de
+    // uploadToSupabaseStorage já usado pra imagem/áudio em outras telas.
+    const resolvedItems = await Promise.all(itemsArray.map(async (item) => {
+        let audioUrl = item.audioUrl || null;
+        if (item.audioFile) {
+            audioUrl = await uploadToSupabaseStorage('media_uploads', 'audios', item.audioFile);
+        }
+        return { word: item.word, syllables: item.syllables, audioUrl, audioFile: item.audioFile || null };
+    }));
+
+    const shouldTrySupabase = supabaseClient && (!currentEditingAudioExerciseId || currentEditingAudioExerciseFromSupabase);
+    if (shouldTrySupabase) {
+        try {
+            const deckFields = { title, syllables_size: size || null, syllables_color: color || null, syllables_font: font || null };
+            let targetExerciseId = currentEditingAudioExerciseId;
+
+            if (targetExerciseId) {
+                const { error: updateErr } = await supabaseClient.from('exercises').update(deckFields).eq('id', targetExerciseId);
+                if (updateErr) throw updateErr;
+                const { error: deleteErr } = await supabaseClient.from('exercise_items').delete().eq('exercise_id', targetExerciseId);
+                if (deleteErr) throw deleteErr;
+            } else {
+                const newExercisePayload = doctorUserId
+                    ? { ...deckFields, visible: true, game_kind: 'audio-real', doctor_user_id: doctorUserId }
+                    : { ...deckFields, visible: false, game_kind: 'audio-real' };
+                const { data: exData, error: insertErr } = await supabaseClient.from('exercises').insert([newExercisePayload]).select().single();
+                if (insertErr) throw insertErr;
+                targetExerciseId = exData.id;
+            }
+
+            const dbItems = resolvedItems.map(item => ({ exercise_id: targetExerciseId, word: item.word, syllables: item.syllables, audio_url: item.audioUrl, link: '' }));
+            const { error: itemsErr } = await supabaseClient.from('exercise_items').insert(dbItems);
+            if (itemsErr) throw itemsErr;
+
+            loadExerciseCards();
+            return;
+        } catch (e) {
+            console.warn('Erro ao salvar exercício de áudio real no Supabase, caindo para local:', e);
+            alert('Não foi possível salvar o exercício no servidor (ficou salvo só neste dispositivo). Detalhe: ' + (e?.message || e));
+        }
+    }
+
+    const localItems = resolvedItems.map(item => ({ word: item.word, syllables: item.syllables, audio_url: item.audioUrl, audioBlob: item.audioFile || undefined }));
+    const localPayload = { title, items: localItems, visible: false, gameKind: 'audio-real', syllablesSize: size || null, syllablesColor: color || null, syllablesFont: font || null };
+    if (currentEditingAudioExerciseId) {
+        db.transaction(['exercises'], 'readonly').objectStore('exercises').get(currentEditingAudioExerciseId).onsuccess = (e) => {
+            const existing = e.target.result || {};
+            db.transaction(['exercises'], 'readwrite').objectStore('exercises')
+                .put({ ...existing, ...localPayload, id: currentEditingAudioExerciseId })
+                .onsuccess = () => loadExerciseCards();
+        };
+    } else {
+        db.transaction(['exercises'], 'readwrite').objectStore('exercises')
+            .add(localPayload)
+            .onsuccess = () => loadExerciseCards();
+    }
+}
+
 // Adiciona um exercício do "Banco de Prontos" (global do admin, ou um dos 2
 // decks semeados só localmente via practiceExerciseSeeds) como um exercício
 // de verdade no banco do médico — mesmo formato de item de "Novo
@@ -2695,7 +2762,7 @@ async function loadExerciseCards() {
                     const items = (itemData || []).filter(item => item.exercise_id === ex.id).map(item => ({
                         word: item.word, syllables: item.syllables, color: item.color, size: item.size, uppercase: item.uppercase,
                         bold: item.bold, videoLink: item.link, image_url: item.image_url,
-                        pairId: item.pair_id, role: item.role
+                        pairId: item.pair_id, role: item.role, audio_url: item.audio_url
                     }));
                     return {
                         id: ex.id,
@@ -2789,6 +2856,7 @@ function renderExerciseCards(exercisesArray) {
         if (ex.gameKind === 'naming') openNamingDeckManage(ex);
         else if (ex.gameKind === 'afasia') openAfasiaDeckManage(ex);
         else if (ex.gameKind === 'syllables') openEditSyllablesExercise(ex);
+        else if (ex.gameKind === 'audio-real') openEditAudioExercise(ex);
         else openEditExercise(ex);
     };
     const openExerciseCard = (ex) => {
@@ -3198,6 +3266,104 @@ function updateSyllablesBlockTitles() {
     const blocks = document.querySelectorAll('.syllables-item-block');
     blocks.forEach((b, index) => {
         b.querySelector('.block-title').textContent = `Palavra ${index + 1}`;
+    });
+}
+
+// Exercício com Áudio Real: mesmo bloco por palavra do de Sílabas, mais um
+// upload de áudio. `audio-current-hint` só aparece na edição, quando o item
+// já tem um audio_url salvo — some assim que um novo arquivo é escolhido.
+let audioBlockCounter = 0;
+
+function createAudioItemBlockHtml(blockId, isEdit = false, hasExistingAudio = false) {
+    return `
+        <div class="audio-item-block" data-block-id="${blockId}">
+            <div class="block-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h4 style="margin:0;" class="block-title">Palavra</h4>
+                ${isEdit ? '<button type="button" class="btn-remove-block" style="background:#ff4d4f;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;"><i class="fas fa-trash" aria-hidden="true"></i> Remover</button>' : ''}
+            </div>
+            <div class="form-group">
+                <label>Palavra Escrita</label>
+                <input type="text" class="audio-item-word" placeholder="Ex: casa" required>
+            </div>
+            <div class="form-group">
+                <label>Sílabas</label>
+                <input type="text" class="audio-item-syllables" placeholder="Ex: ca-sa" required>
+            </div>
+            <div class="form-group">
+                <label>Áudio gravado (.mp3 ou .wav)</label>
+                <input type="file" class="audio-item-file" accept="audio/*,.mp3,.wav" ${hasExistingAudio ? '' : 'required'}>
+                <span class="audio-current-hint" style="display:${hasExistingAudio ? 'inline-block' : 'none'};font-size:13px;color:#666;margin-top:4px;">
+                    <i class="fas fa-check-circle" aria-hidden="true" style="color:#0d9488;"></i> Áudio já salvo — escolha um novo arquivo só se quiser substituir.
+                </span>
+            </div>
+        </div>
+    `;
+}
+
+function addAudioItemBlock(isEdit = false, hasExistingAudio = false) {
+    const container = document.getElementById('audio-items-container');
+    const blockId = audioBlockCounter++;
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = createAudioItemBlockHtml(blockId, isEdit, hasExistingAudio);
+    const blockEl = wrapper.firstElementChild;
+
+    const removeBtn = blockEl.querySelector('.btn-remove-block');
+    if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+            container.removeChild(blockEl);
+            updateAudioBlockTitles();
+        });
+    }
+    // Trocar o arquivo esconde o aviso de "áudio já salvo" — a nova escolha
+    // é o que vai valer no submit (ver handler do formulário).
+    blockEl.querySelector('.audio-item-file').addEventListener('change', (e) => {
+        const hint = blockEl.querySelector('.audio-current-hint');
+        if (hint && e.target.files[0]) hint.style.display = 'none';
+    });
+
+    container.appendChild(blockEl);
+    updateAudioBlockTitles();
+}
+
+function updateAudioBlockTitles() {
+    const blocks = document.querySelectorAll('.audio-item-block');
+    blocks.forEach((b, index) => {
+        b.querySelector('.block-title').textContent = `Palavra ${index + 1}`;
+    });
+}
+
+let currentEditingAudioUrls = {};
+
+function openEditAudioExercise(ex) {
+    currentEditingAudioExerciseId = ex.id;
+    currentEditingAudioExerciseFromSupabase = !!ex.fromSupabase;
+    audioBlockCounter = 0;
+    currentEditingAudioUrls = {};
+
+    document.getElementById('audio-exercise-modal').style.display = 'flex';
+    document.getElementById('audio-exercise-modal').querySelector('h2').textContent = "Editar Exercício (Áudio Real)";
+
+    const parts = (ex.title || '').split('|');
+    const displayTitle = parts[0];
+    const colorClass = parts[1] || 'pink';
+
+    document.getElementById('audio-exercise-title').value = displayTitle;
+    document.getElementById('audio-exercise-color').value = colorClass;
+    document.getElementById('audio-text-size').value = ex.syllablesSize || '100';
+    document.getElementById('audio-text-color').value = ex.syllablesColor || '#1f1f1f';
+    document.getElementById('audio-font').value = ex.syllablesFont || "'Outfit', sans-serif";
+
+    const container = document.getElementById('audio-items-container');
+    container.innerHTML = '';
+
+    ex.items.forEach((item, index) => {
+        const hasExistingAudio = !!item.audio_url || item.audioBlob instanceof Blob;
+        addAudioItemBlock(true, hasExistingAudio);
+        const blockEl = container.querySelector(`[data-block-id="${index}"]`);
+        blockEl.querySelector('.audio-item-word').value = item.word || '';
+        blockEl.querySelector('.audio-item-syllables').value = item.syllables || '';
+        if (item.audio_url) currentEditingAudioUrls[index] = item.audio_url;
     });
 }
 
@@ -3958,6 +4124,68 @@ function setupModals() {
         closeSyllablesExerciseUpload();
     });
 
+    const openAudioExerciseCreator = () => {
+        closeExerciseType();
+        currentEditingAudioExerciseId = null;
+        currentEditingAudioExerciseFromSupabase = false;
+        audioBlockCounter = 0;
+        currentEditingAudioUrls = {};
+
+        document.getElementById('audio-exercise-modal').style.display = 'flex';
+        document.getElementById('audio-exercise-modal').querySelector('h2').textContent = "Novo Exercício (Áudio Real)";
+        document.getElementById('audio-exercise-form').reset();
+
+        const container = document.getElementById('audio-items-container');
+        container.innerHTML = '';
+        addAudioItemBlock();
+    };
+    document.getElementById('btn-create-audio-exercise').addEventListener('click', openAudioExerciseCreator);
+
+    const closeAudioExerciseUpload = () => { document.getElementById('audio-exercise-modal').style.display = 'none'; document.getElementById('audio-exercise-form').reset(); };
+    document.getElementById('btn-close-audio-exercise').addEventListener('click', closeAudioExerciseUpload);
+    document.getElementById('btn-cancel-audio-exercise').addEventListener('click', closeAudioExerciseUpload);
+
+    document.getElementById('btn-add-audio-item').addEventListener('click', () => {
+        addAudioItemBlock(true);
+    });
+
+    document.getElementById('audio-exercise-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!isAdmin && !isDoctor) {
+            alert('Apenas administradores ou médicos podem salvar exercícios.');
+            return;
+        }
+        const titleVal = document.getElementById('audio-exercise-title').value.trim();
+        const colorVal = document.getElementById('audio-exercise-color').value;
+        const finalTitle = `${titleVal}|${colorVal}`;
+        const sizeVal = document.getElementById('audio-text-size').value;
+        const colorTextVal = document.getElementById('audio-text-color').value;
+        const fontVal = document.getElementById('audio-font').value;
+
+        const blocks = document.querySelectorAll('.audio-item-block');
+        if (blocks.length === 0) return alert("Adicione pelo menos uma palavra.");
+
+        const itemsArray = [];
+        let missingAudio = false;
+        blocks.forEach(block => {
+            const blockId = block.dataset.blockId;
+            const audioFile = block.querySelector('.audio-item-file').files[0] || null;
+            const audioUrl = !audioFile ? (currentEditingAudioUrls[blockId] || null) : null;
+            if (!audioFile && !audioUrl) missingAudio = true;
+            itemsArray.push({
+                word: block.querySelector('.audio-item-word').value,
+                syllables: block.querySelector('.audio-item-syllables').value,
+                audioFile,
+                audioUrl
+            });
+        });
+        if (missingAudio) return alert("Toda palavra deste exercício precisa de um áudio gravado (.mp3 ou .wav).");
+
+        const targetDoctorUserId = isDoctor ? currentUserId : null;
+        saveAudioExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, itemsArray, targetDoctorUserId);
+        closeAudioExerciseUpload();
+    });
+
     document.getElementById('btn-close-video').addEventListener('click', () => {
         document.getElementById('video-modal').style.display = 'none';
         document.getElementById('video-player').pause();
@@ -3989,7 +4217,21 @@ function setupModals() {
                 group: 'Exercícios',
                 detail: `Ouviu palavra: ${item.word}`
             });
-            speakWithAzure(item.word);
+            // Exercício com Áudio Real: toca a gravação de verdade em vez da
+            // voz sintética, quando o item tem uma (mesmo padrão já usado
+            // pelos cards de Tópicos/Core — audioBlob local ou audio_url do
+            // Supabase, com TTS só como fallback).
+            if (item.audioBlob instanceof Blob) {
+                if (currentAudio) currentAudio.pause();
+                currentAudio = new Audio(URL.createObjectURL(item.audioBlob));
+                currentAudio.play();
+            } else if (item.audio_url) {
+                if (currentAudio) currentAudio.pause();
+                currentAudio = new Audio(item.audio_url);
+                currentAudio.play();
+            } else {
+                speakWithAzure(item.word);
+            }
         }
     });
 }
@@ -4030,7 +4272,7 @@ function openPresentationPlaylist(ex) {
 
     currentPlaylistItems = ex.items;
     currentPlaylistIndex = 0;
-    currentPlaylistDeckStyle = ex.gameKind === 'syllables'
+    currentPlaylistDeckStyle = (ex.gameKind === 'syllables' || ex.gameKind === 'audio-real')
         ? { size: ex.syllablesSize, color: ex.syllablesColor, font: ex.syllablesFont }
         : null;
 
@@ -4155,10 +4397,13 @@ function renderCurrentPlaylistItem() {
         document.getElementById('btn-speak-presentation').style.display = embedUrl ? 'none' : '';
 
         // Pré-carrega o áudio do slide atual e do próximo para o clique no botão
-        // de som (e a navegação com as setas) responder na hora.
-        if (!embedUrl) prefetchTts(item.word);
+        // de som (e a navegação com as setas) responder na hora. Slides com
+        // áudio real próprio (Exercício com Áudio Real) não precisam de TTS —
+        // pré-carregar a voz da Azure ali seria uma chamada de API à toa.
+        const hasOwnAudio = (it) => it.audioBlob instanceof Blob || !!it.audio_url;
+        if (!embedUrl && !hasOwnAudio(item)) prefetchTts(item.word);
         const nextItem = currentPlaylistItems[currentPlaylistIndex + 1];
-        if (nextItem && !getEmbedUrl(nextItem.videoLink)) prefetchTts(nextItem.word);
+        if (nextItem && !getEmbedUrl(nextItem.videoLink) && !hasOwnAudio(nextItem)) prefetchTts(nextItem.word);
 
         // Pré-carrega a imagem dos slides vizinhos: sem isso, cada avanço só
         // começa a buscar a imagem depois do clique, e em decks grandes

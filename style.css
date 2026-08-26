@@ -319,6 +319,8 @@ body {
 .exercise-type-option.afasia i { color: #ca8a04; }
 .exercise-type-option.ready-bank { border-color: #86efac; }
 .exercise-type-option.ready-bank i { color: #16a34a; }
+.exercise-type-option.audio-real { border-color: #5eead4; }
+.exercise-type-option.audio-real i { color: #0d9488; }
 @media (max-width: 600px) {
     .exercise-type-grid { grid-template-columns: 1fr; }
     .exercise-type-option { min-height: 145px; }
