@@ -3301,18 +3301,9 @@ function createExerciseBlockHtml(blockId, isEdit = false, hasOldImage = false) {
                 <label>Palavra Escrita</label>
                 <input type="text" class="item-word" placeholder="Ex: PÓ" required>
             </div>
-            <div class="form-group">
-                <label>Sílabas (opcional) — ex: ca-sa. Aparece como legenda sobre a imagem.</label>
-                <div class="word-editor-toolbar">
-                    <button type="button" class="word-editor-btn word-editor-bold" title="Negrito na seleção"><i class="fas fa-bold" aria-hidden="true"></i></button>
-                    <input type="color" class="word-editor-color" title="Cor na seleção" value="#e63946">
-                    <button type="button" class="word-editor-btn word-editor-clear" title="Limpar formatação">Limpar</button>
-                </div>
-                <div class="item-syllables word-editor-field" contenteditable="true" data-placeholder="Ex: ca-sa" role="textbox" aria-label="Sílabas"></div>
-            </div>
             <div style="display: flex; gap: 10px; margin-bottom: 15px;">
                 <div class="form-group" style="flex: 1; margin-bottom: 0;">
-                    <label>Cor do Texto</label>
+                    <label>Cor do Texto (Palavra Escrita)</label>
                     <input type="color" class="item-color" value="#333333" style="width: 100%; height: 40px; cursor: pointer; border: 1px solid #ddd; border-radius: 8px;">
                 </div>
                 <div class="form-group" style="flex: 1; margin-bottom: 0;">
@@ -3325,8 +3316,17 @@ function createExerciseBlockHtml(blockId, isEdit = false, hasOldImage = false) {
                     <input type="checkbox" class="item-uppercase" style="width: 18px; height: 18px; cursor: pointer;"> Caixa Alta
                 </label>
                 <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: bold; cursor: pointer; color: #333;">
-                    <input type="checkbox" class="item-bold" style="width: 18px; height: 18px; cursor: pointer;" checked> Negrito
+                    <input type="checkbox" class="item-bold" style="width: 18px; height: 18px; cursor: pointer;" checked> Negrito (Palavra Escrita)
                 </label>
+            </div>
+            <div class="form-group">
+                <label>Sílabas (opcional) — ex: ca-sa. Aparece como legenda sobre a imagem.</label>
+                <div class="word-editor-toolbar">
+                    <button type="button" class="word-editor-btn word-editor-bold" title="Negrito na seleção"><i class="fas fa-bold" aria-hidden="true"></i></button>
+                    <input type="color" class="word-editor-color" title="Cor na seleção" value="#e63946">
+                    <button type="button" class="word-editor-btn word-editor-clear" title="Limpar formatação">Limpar</button>
+                </div>
+                <div class="item-syllables word-editor-field" contenteditable="true" data-placeholder="Ex: ca-sa" role="textbox" aria-label="Sílabas"></div>
             </div>
             <div class="form-group">
                 <label>Imagem (Objeto) — opcional, usa pictograma automático se vazio</label>
