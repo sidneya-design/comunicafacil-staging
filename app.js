@@ -4195,6 +4195,11 @@ function setupModals() {
         stopUsageActivity('fechar-apresentacao');
         document.getElementById('presentation-modal').style.display = 'none';
         document.getElementById('presentation-iframe').src = '';
+        // Corta o áudio (real ou TTS) que estava tocando — sem isso, um áudio
+        // real gravado (mais longo que a fala curta da Azure) continuava
+        // audível mesmo com a apresentação já fechada.
+        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     });
 
     document.getElementById('btn-prev-presentation').addEventListener('click', () => navigatePlaylist(-1));
@@ -4260,6 +4265,11 @@ function playMedia(media) {
 function navigatePlaylist(direction) {
     const newIndex = currentPlaylistIndex + direction;
     if (newIndex >= 0 && newIndex < currentPlaylistItems.length) {
+        // Corta o áudio do slide anterior antes de trocar — mesmo cuidado do
+        // botão Fechar, senão um áudio real (mais longo que a fala da Azure)
+        // continua tocando por cima do slide novo.
+        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
         currentPlaylistIndex = newIndex;
         renderCurrentPlaylistItem();
     } else {
@@ -4331,8 +4341,11 @@ function renderCurrentPlaylistItem() {
         // sem esse cuidado no futuro, então normaliza sempre).
         const displaySyllables = (item.syllables || '').replace(/[-.]/g, '.​');
 
-        if (item.syllables && currentPlaylistDeckStyle) {
-            // Exercício de Sílabas dedicado: sílabas substituem a imagem por completo.
+        if (currentPlaylistDeckStyle) {
+            // Exercício de Sílabas dedicado (e Exercício com Áudio Real, que usa o
+            // mesmo deck style): sílabas substituem a imagem por completo, sem
+            // buscar pictograma nenhum — o gate é currentPlaylistDeckStyle (só
+            // esses dois game_kind setam ele), não a própria palavra ter sílabas.
             imgEl.style.display = 'none';
             imgEl.src = '';
             captionEl.style.display = 'none';
@@ -4411,10 +4424,10 @@ function renderCurrentPlaylistItem() {
         // lenta. O navegador cacheia a imagem assim que o Image() carrega.
         const prevItem = currentPlaylistItems[currentPlaylistIndex - 1];
         [nextItem, prevItem].forEach(neighbor => {
-            // Só pula a imagem quando as sílabas SUBSTITUEM ela de vez (deck do
-            // Exercício de Sílabas dedicado) — no Exercício com Slides, sílabas
-            // são só uma legenda sobre a foto, que continua precisando carregar.
-            if (!neighbor || (neighbor.syllables && currentPlaylistDeckStyle)) return;
+            // Só pula a imagem quando o deck SUBSTITUI ela de vez (Exercício de
+            // Sílabas ou de Áudio Real) — no Exercício com Slides, sílabas são só
+            // uma legenda sobre a foto, que continua precisando carregar.
+            if (!neighbor || currentPlaylistDeckStyle) return;
             if (neighbor.image_url) {
                 const preloader = new Image();
                 preloader.src = neighbor.image_url;
