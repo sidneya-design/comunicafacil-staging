@@ -1915,6 +1915,15 @@ async function migrateLocalMediaAndExercises() {
             const locais = e.target.result;
             for (const ex of locais) {
                 if (ex.seedKey) continue; // conteúdo de prática semeado localmente: não promover à nuvem automaticamente
+                // Exercício de um tipo dedicado (Sílabas, Áudio Real, etc. — ex.gameKind
+                // preenchido) caiu aqui só porque o save real falhou (RLS, constraint...)
+                // e ficou salvo apenas localmente. saveExercisePlaylistToDB só sabe migrar
+                // o formato genérico de Slides (sem game_kind/audio_url/estilo do deck) —
+                // usá-la aqui perderia esses campos, e o insert sem doctor_user_id/user_id
+                // também é barrado pela RLS pra contas de médico. Deixa como está: some da
+                // lista assim que a pessoa reabrir o editor certo (de Sílabas/Áudio Real)
+                // e salvar de novo por lá, dessa vez pelo caminho que sabe migrar direito.
+                if (ex.gameKind) continue;
                 currentEditingExerciseId = null; // force insert as new
                 currentEditingExerciseForkSource = null;
                 await saveExercisePlaylistToDB(ex.title, ex.items || []);
