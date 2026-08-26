@@ -3303,7 +3303,12 @@ function createExerciseBlockHtml(blockId, isEdit = false, hasOldImage = false) {
             </div>
             <div class="form-group">
                 <label>Sílabas (opcional) — ex: ca-sa. Aparece como legenda sobre a imagem.</label>
-                <input type="text" class="item-syllables" placeholder="Ex: ca-sa">
+                <div class="word-editor-toolbar">
+                    <button type="button" class="word-editor-btn word-editor-bold" title="Negrito na seleção"><i class="fas fa-bold" aria-hidden="true"></i></button>
+                    <input type="color" class="word-editor-color" title="Cor na seleção" value="#e63946">
+                    <button type="button" class="word-editor-btn word-editor-clear" title="Limpar formatação">Limpar</button>
+                </div>
+                <div class="item-syllables word-editor-field" contenteditable="true" data-placeholder="Ex: ca-sa" role="textbox" aria-label="Sílabas"></div>
             </div>
             <div style="display: flex; gap: 10px; margin-bottom: 15px;">
                 <div class="form-group" style="flex: 1; margin-bottom: 0;">
@@ -3357,6 +3362,7 @@ function addExerciseBlock(isEdit = false, hasOldImage = false) {
 
     container.appendChild(blockEl);
     updateBlockTitles();
+    wireAllWordEditors(blockEl);
 }
 
 function updateBlockTitles() {
@@ -3593,7 +3599,7 @@ function openEditExercise(ex) {
 
         const blockEl = container.querySelector(`[data-block-id="${index}"]`);
         blockEl.querySelector('.item-word').value = item.word || '';
-        blockEl.querySelector('.item-syllables').value = item.syllables || '';
+        blockEl.querySelector('.item-syllables').innerHTML = sanitizeWordHtml(item.syllables || '');
         blockEl.querySelector('.item-link').value = item.videoLink || item.link || '';
         blockEl.querySelector('.item-color').value = item.color || item.textColor || '#333333';
         blockEl.querySelector('.item-size').value = item.size || item.textSize || '100';
@@ -4241,7 +4247,7 @@ function setupModals() {
 
             itemsArray.push({
                 word: block.querySelector('.item-word').value,
-                syllables: block.querySelector('.item-syllables').value.trim(),
+                syllables: sanitizeWordHtml(block.querySelector('.item-syllables').innerHTML),
                 color: block.querySelector('.item-color').value,
                 size: block.querySelector('.item-size').value,
                 uppercase: block.querySelector('.item-uppercase').checked,
@@ -4617,7 +4623,10 @@ function renderCurrentPlaylistItem() {
                 // Mesmo tamanho da palavra escrita à esquerda — só encolhe
                 // (fitTextToWidth) se não couber na largura disponível.
                 captionEl.style.fontSize = ((item.textSize || 100) * 0.7) + 'px';
-                captionEl.textContent = displaySyllables;
+                captionEl.innerHTML = sanitizeWordHtml(displaySyllables);
+                // Reset explícito (ver comentário equivalente no ramo de cima):
+                // captionEl é reaproveitado entre slides.
+                captionEl.style.fontWeight = /<(strong|span)/i.test(item.syllables || '') ? '400' : '';
                 // Mede contra .presentation-right (largura estável), não o wrap da
                 // imagem — o wrap só ganha tamanho real depois que a imagem carrega
                 // (ou o pictograma do ARASAAC chega, que é assíncrono), e medir

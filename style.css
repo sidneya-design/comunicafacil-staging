@@ -308,7 +308,7 @@ body {
 .word-editor-field { width: 100%; min-height: 44px; box-sizing: border-box; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; font-family: inherit; outline: none; }
 .word-editor-field:focus { border-color: #2196F3; }
 .word-editor-field:empty:before { content: attr(data-placeholder); color: #999; }
-.word-editor-field strong, #presentation-word-text strong, #presentation-syllables strong, .word-btn-syllables-preview strong { font-weight: 800; }
+.word-editor-field strong, #presentation-word-text strong, #presentation-syllables strong, #presentation-image-caption strong, .word-btn-syllables-preview strong { font-weight: 800; }
 .exercise-type-modal-content { max-width: 720px; }
 .exercise-type-hint { margin: 0 0 20px; color: #666; }
 .exercise-type-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
