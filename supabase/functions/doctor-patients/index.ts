@@ -52,19 +52,47 @@ Deno.serve(async (req) => {
       return json({ error: "Apenas médicos ou administradores podem gerenciar pacientes." }, 403);
     }
 
+    // Empresa do médico que chamou — paciente pode ter mais de um médico
+    // responsável na prática, então "é meu paciente?" (abaixo, canManagePatient)
+    // passa a valer tanto pro dono exato quanto pra colega da mesma empresa.
+    let callerCompanyId: string | null = null;
+    if (callerIsDoctor) {
+      const { data: membership } = await admin
+        .from("company_members")
+        .select("company_id")
+        .eq("user_id", caller.id)
+        .maybeSingle();
+      callerCompanyId = membership?.company_id ?? null;
+    }
+
+    async function canManagePatient(patientId: string): Promise<boolean> {
+      if (!callerIsDoctor) return true; // admin já filtrado antes de chegar aqui
+      const { data: patient } = await admin
+        .from("patients")
+        .select("doctor_user_id, company_id")
+        .eq("id", patientId)
+        .maybeSingle();
+      if (!patient) return false;
+      return patient.doctor_user_id === caller.id
+        || (!!callerCompanyId && patient.company_id === callerCompanyId);
+    }
+
     const { action, payload } = await req.json();
 
     switch (action) {
       case "list": {
         // Admin pode listar os pacientes de um médico específico (payload.doctorUserId)
-        // ou de todos; médico só vê os próprios.
+        // ou de todos; médico vê os próprios + os dos colegas da mesma empresa
+        // (paciente pode ter mais de um médico responsável na prática).
         let query = admin
           .from("patients")
           .select("id, user_id, doctor_user_id, company_id, name, active, created_at")
           .order("name");
 
         if (callerIsDoctor) {
-          query = query.eq("doctor_user_id", caller.id);
+          query = callerCompanyId
+            ? query.or(`doctor_user_id.eq.${caller.id},company_id.eq.${callerCompanyId}`)
+            : query.eq("doctor_user_id", caller.id);
         } else if (payload?.doctorUserId) {
           query = query.eq("doctor_user_id", payload.doctorUserId);
         }
@@ -144,15 +172,8 @@ Deno.serve(async (req) => {
         const { patientId, userId, name } = payload ?? {};
         if (!patientId || !userId) return json({ error: "patientId e userId são obrigatórios." }, 400);
 
-        if (callerIsDoctor) {
-          const { data: patient } = await admin
-            .from("patients")
-            .select("doctor_user_id")
-            .eq("id", patientId)
-            .maybeSingle();
-          if (!patient || patient.doctor_user_id !== caller.id) {
-            return json({ error: "Paciente não encontrado." }, 404);
-          }
+        if (!(await canManagePatient(patientId))) {
+          return json({ error: "Paciente não encontrado." }, 404);
         }
 
         const { error: authErr } = await admin.auth.admin.updateUserById(userId, { user_metadata: { full_name: name } });
@@ -170,15 +191,8 @@ Deno.serve(async (req) => {
           return json({ error: "A senha precisa ter ao menos 6 caracteres." }, 400);
         }
 
-        if (callerIsDoctor) {
-          const { data: patient } = await admin
-            .from("patients")
-            .select("doctor_user_id")
-            .eq("id", patientId)
-            .maybeSingle();
-          if (!patient || patient.doctor_user_id !== caller.id) {
-            return json({ error: "Paciente não encontrado." }, 404);
-          }
+        if (!(await canManagePatient(patientId))) {
+          return json({ error: "Paciente não encontrado." }, 404);
         }
 
         const { error } = await admin.auth.admin.updateUserById(userId, { password });
@@ -192,15 +206,8 @@ Deno.serve(async (req) => {
         const { patientId, userId, active } = payload ?? {};
         if (!patientId || !userId) return json({ error: "patientId e userId são obrigatórios." }, 400);
 
-        if (callerIsDoctor) {
-          const { data: patient } = await admin
-            .from("patients")
-            .select("doctor_user_id")
-            .eq("id", patientId)
-            .maybeSingle();
-          if (!patient || patient.doctor_user_id !== caller.id) {
-            return json({ error: "Paciente não encontrado." }, 404);
-          }
+        if (!(await canManagePatient(patientId))) {
+          return json({ error: "Paciente não encontrado." }, 404);
         }
 
         const { error: authErr } = await admin.auth.admin.updateUserById(userId, {
