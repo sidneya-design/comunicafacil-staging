@@ -4542,10 +4542,15 @@ function renderCurrentPlaylistItem() {
         // (Exercício de Sílabas e Áudio Real, negrito/cor por trecho); pra palavra
         // sem nenhuma formatação (Exercício com Slides) isso equivale a texto puro.
         wordEl.innerHTML = sanitizeWordHtml(item.word || '');
-        wordEl.style.color = item.textColor || '#333333';
-        wordEl.style.fontSize = (item.textSize || '100') + 'px';
-        wordEl.style.textTransform = item.isUppercase ? 'uppercase' : 'none';
-        wordEl.style.fontWeight = (item.isBold !== undefined ? item.isBold : true) ? '800' : '400';
+        // item.textColor/textSize/isUppercase/isBold é a convenção dos seeds locais;
+        // exercícios salvos no Supabase vêm com as colunas color/size/uppercase/bold
+        // (exercise_items) — sem o fallback, a cor/tamanho/caixa-alta escolhidos no
+        // formulário nunca refletiam na apresentação de um deck salvo no servidor.
+        wordEl.style.color = item.textColor || item.color || '#333333';
+        wordEl.style.fontSize = (item.textSize || item.size || '100') + 'px';
+        wordEl.style.textTransform = (item.isUppercase !== undefined ? item.isUppercase : item.uppercase) ? 'uppercase' : 'none';
+        const wordIsBold = item.isBold !== undefined ? item.isBold : (item.bold !== undefined ? item.bold : true);
+        wordEl.style.fontWeight = wordIsBold ? '800' : '400';
 
         const imgEl = document.getElementById('presentation-image');
         const syllablesEl = document.getElementById('presentation-syllables');
@@ -4622,7 +4627,7 @@ function renderCurrentPlaylistItem() {
                 captionEl.style.display = 'inline-block';
                 // Mesmo tamanho da palavra escrita à esquerda — só encolhe
                 // (fitTextToWidth) se não couber na largura disponível.
-                captionEl.style.fontSize = ((item.textSize || 100) * 0.7) + 'px';
+                captionEl.style.fontSize = ((item.textSize || item.size || 100) * 0.7) + 'px';
                 captionEl.innerHTML = sanitizeWordHtml(displaySyllables);
                 // Reset explícito (ver comentário equivalente no ramo de cima):
                 // captionEl é reaproveitado entre slides.
