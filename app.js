@@ -3059,13 +3059,18 @@ function renderExerciseCards(exercisesArray) {
         // de pasta genérico — tanto no Exercício de Sílabas dedicado (que nunca
         // tem imagem, ver renderCurrentPlaylistItem) quanto no Exercício com
         // Slides quando o item foi criado sem foto (usa só sílabas/palavra
-        // como legenda). Nesses casos mostra a sílaba/palavra do 1º item.
+        // como legenda). Nesses casos mostra a palavra do 1º item (não as
+        // sílabas hifenizadas — isso é formatação de ensino pra apresentação,
+        // não pra um rótulo identificador de card; "a.bra.ço" no card confundia
+        // mais do que ajudava, "Abraço" é o que identifica o exercício).
         if (firstItem && firstItem.imageBlob instanceof Blob) {
             imgContainer.innerHTML = `<img src="${URL.createObjectURL(firstItem.imageBlob)}" class="word-btn-img" alt="" />`;
         } else if (firstItem && firstItem.image_url) {
             imgContainer.innerHTML = `<img src="${firstItem.image_url}" class="word-btn-img" alt="" />`;
-        } else if (firstItem && (firstItem.syllables || firstItem.word)) {
-            const displaySyllables = (firstItem.syllables || stripWordHtml(firstItem.word)).replace(/[-.]/g, '.​');
+        } else if (firstItem && (firstItem.word || firstItem.syllables)) {
+            const displaySyllables = firstItem.word
+                ? stripWordHtml(firstItem.word)
+                : (firstItem.syllables || '').replace(/[-.]/g, '.​');
             const previewEl = document.createElement('span');
             previewEl.className = 'word-btn-syllables-preview';
             previewEl.innerHTML = sanitizeWordHtml(displaySyllables);
