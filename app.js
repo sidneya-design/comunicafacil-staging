@@ -2136,7 +2136,7 @@ async function saveMediaToDB(title, fileBlob, mimeType, colorClass, mediaUrl, pa
         // Pacientes → Mídias), mesma semântica de doctor_user_id em
         // exercises (saveExercisePlaylistToDB).
         const { data: sessionData } = await supabaseClient.auth.getSession();
-        extraFields = { visible: true, doctor_user_id: currentUserId, user_id: sessionData?.session?.user?.id };
+        extraFields = { visible: true, doctor_user_id: currentUserId, company_id: currentUserCompanyId, user_id: sessionData?.session?.user?.id };
     }
     if (supabaseClient) {
         try {
@@ -2450,7 +2450,7 @@ async function getOrCreateExerciseFork(sourceId, title, doctorUserId) {
         .eq('doctor_user_id', doctorUserId).eq('forked_from', sourceId).maybeSingle();
     if (existing) return existing.id;
     const { data: created, error } = await supabaseClient.from('exercises')
-        .insert([{ title, visible: true, doctor_user_id: doctorUserId, forked_from: sourceId }])
+        .insert([{ title, visible: true, doctor_user_id: doctorUserId, company_id: currentUserCompanyId, forked_from: sourceId }])
         .select().single();
     if (error) throw error;
     return created.id;
@@ -2498,7 +2498,7 @@ async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null) 
                 // Exercício de médico entra direto no banco dele (ninguém mais vê até
                 // ele liberar por paciente em "Meus Pacientes" — patient_exercise_flags).
                 const newExercisePayload = doctorUserId
-                    ? { title, visible: true, doctor_user_id: doctorUserId }
+                    ? { title, visible: true, doctor_user_id: doctorUserId, company_id: currentUserCompanyId }
                     : { title, visible: false };
                 const { data: exData, error: insertErr } = await supabaseClient.from('exercises').insert([newExercisePayload]).select().single();
                 if (insertErr) throw insertErr;
@@ -2554,7 +2554,7 @@ async function saveSyllablesExerciseToDB(title, size, color, font, itemsArray, d
                 if (deleteErr) throw deleteErr;
             } else {
                 const newExercisePayload = doctorUserId
-                    ? { ...deckFields, visible: true, game_kind: 'syllables', doctor_user_id: doctorUserId }
+                    ? { ...deckFields, visible: true, game_kind: 'syllables', doctor_user_id: doctorUserId, company_id: currentUserCompanyId }
                     : { ...deckFields, visible: false, game_kind: 'syllables' };
                 const { data: exData, error: insertErr } = await supabaseClient.from('exercises').insert([newExercisePayload]).select().single();
                 if (insertErr) throw insertErr;
@@ -2626,7 +2626,7 @@ async function saveAudioExerciseToDB(title, size, color, font, itemsArray, docto
                 if (deleteErr) throw deleteErr;
             } else {
                 const newExercisePayload = doctorUserId
-                    ? { ...deckFields, visible: true, game_kind: 'audio-real', doctor_user_id: doctorUserId }
+                    ? { ...deckFields, visible: true, game_kind: 'audio-real', doctor_user_id: doctorUserId, company_id: currentUserCompanyId }
                     : { ...deckFields, visible: false, game_kind: 'audio-real' };
                 const { data: exData, error: insertErr } = await supabaseClient.from('exercises').insert([newExercisePayload]).select().single();
                 if (insertErr) throw insertErr;
@@ -4138,7 +4138,7 @@ function setupModals() {
         closeExerciseType();
         try {
             const payload = { title: `${deckTitle.trim()}|red`, visible: true, game_kind: 'naming' };
-            if (isDoctor) payload.doctor_user_id = currentUserId;
+            if (isDoctor) { payload.doctor_user_id = currentUserId; payload.company_id = currentUserCompanyId; }
             const { data: created, error } = await supabaseClient.from('exercises').insert([payload]).select().single();
             if (error) throw error;
             await loadExerciseCards();
@@ -4163,7 +4163,7 @@ function setupModals() {
         closeExerciseType();
         try {
             const payload = { title: `${deckTitle.trim()}|yellow`, visible: true, game_kind: 'afasia' };
-            if (isDoctor) payload.doctor_user_id = currentUserId;
+            if (isDoctor) { payload.doctor_user_id = currentUserId; payload.company_id = currentUserCompanyId; }
             const { data: created, error } = await supabaseClient.from('exercises').insert([payload]).select().single();
             if (error) throw error;
             await loadExerciseCards();
@@ -8694,7 +8694,7 @@ async function getOrCreateGameContainer(seedKey, title, doctorUserId = null) {
 
         try {
             const { data: created, error: insertErr } = await supabaseClient.from('exercises')
-                .insert([{ title, visible: false, seed_key: seedKey, doctor_user_id: doctorUserId }])
+                .insert([{ title, visible: false, seed_key: seedKey, doctor_user_id: doctorUserId, company_id: currentUserCompanyId }])
                 .select().single();
             if (!insertErr && created) return { ...created, fromSupabase: true, seedKey };
         } catch (e) {}
@@ -10902,6 +10902,17 @@ let isDoctor = false; // Papel "doctor": gerencia só os próprios pacientes, n�
 let currentPatientId = null; // Preenchido quando o papel logado é "patient"
 let currentPatientDoctorUserId = null; // doctor_user_id do próprio médico do paciente logado (resolveGameContainer)
 let currentUserId = null; // uuid do usuário logado, pra saber "isso é meu?" (banco de exercícios do médico)
+let currentUserCompanyId = null; // company_id do médico logado (company_members) — grava em tudo que ele cria, pra outros médicos da mesma empresa também verem (RLS já suporta isso via can_view_*, só faltava o app preencher)
+
+// Filtro do "banco do médico" (exercises/topics/virtues/medias) usado nas
+// telas de liberar conteúdo pro paciente: próprio banco (por autor) + banco
+// da empresa (colegas) + conteúdo global do admin. Sem o ramo de empresa,
+// mesmo com company_id preenchido e a RLS já permitindo o SELECT, essa
+// lista client-side escondia o que os colegas criaram.
+function doctorBankOrFilter() {
+    const companyClause = currentUserCompanyId ? `,company_id.eq.${currentUserCompanyId}` : '';
+    return `doctor_user_id.eq.${currentUserId}${companyClause},and(doctor_user_id.is.null,company_id.is.null,patient_id.is.null)`;
+}
 let activePatientContext = null; // { id, name } — médico "entrou" no paciente pra editar Carômetro/Livros/Mídias dele
 let patientExerciseReleaseMap = new Map(); // exercise_id (string) -> visible, só preenchido quando activePatientContext (tela "olho" de Exercícios)
 
@@ -10966,6 +10977,12 @@ if (supabaseClient) {
             isAdmin = isCompleteSentenceLocalDemo() || role === 'editor' || role === 'admin';
             canManageUsers = role === 'admin';
             isDoctor = role === 'doctor'; // Não entra em isAdmin: médico não deve editar conteúdo geral
+
+            if (isDoctor) {
+                const { data: memberRow } = await supabaseClient
+                    .from('company_members').select('company_id').eq('user_id', userId).maybeSingle();
+                currentUserCompanyId = memberRow?.company_id || null;
+            }
 
             if (role === 'patient') {
                 const { data: patientRow } = await supabaseClient
@@ -11771,7 +11788,7 @@ async function openPatientExercisesModal(patient) {
     // precisa liberar também, mesma lista/mecanismo do banco próprio).
     const { data: myExercises } = await supabaseClient
         .from('exercises').select('id, title, seed_key, doctor_user_id')
-        .or(`doctor_user_id.eq.${currentUserId},and(doctor_user_id.is.null,company_id.is.null,patient_id.is.null)`)
+        .or(doctorBankOrFilter())
         .order('title');
     const { data: overrides } = await supabaseClient
         .from('patient_exercise_flags').select('exercise_id, visible').eq('patient_id', patient.id);
@@ -11867,7 +11884,7 @@ async function openPatientTopicsModal(patient) {
     // conceito da Fase 21 aplicado a Tópicos).
     const { data: myTopics } = await supabaseClient
         .from('topics').select('id, folder, doctor_user_id')
-        .or(`doctor_user_id.eq.${currentUserId},and(doctor_user_id.is.null,company_id.is.null,patient_id.is.null)`)
+        .or(doctorBankOrFilter())
         .order('folder');
     const { data: overrides } = await supabaseClient
         .from('patient_topic_flags').select('topic_id, visible').eq('patient_id', patient.id);
@@ -11932,7 +11949,7 @@ async function openPatientVirtuesModal(patient) {
     // conceito da Fase 21 aplicado a Virtudes).
     const { data: myVirtues } = await supabaseClient
         .from('virtues').select('id, folder, doctor_user_id')
-        .or(`doctor_user_id.eq.${currentUserId},and(doctor_user_id.is.null,company_id.is.null,patient_id.is.null)`)
+        .or(doctorBankOrFilter())
         .order('folder');
     const { data: overrides } = await supabaseClient
         .from('patient_virtue_flags').select('virtue_id, visible').eq('patient_id', patient.id);
@@ -11999,7 +12016,7 @@ async function openPatientMediasModal(patient) {
     // Inclui o banco do médico E o conteúdo global do admin (Fase 21).
     const { data: myMedias } = await supabaseClient
         .from('medias').select('id, title, doctor_user_id')
-        .or(`doctor_user_id.eq.${currentUserId},and(doctor_user_id.is.null,company_id.is.null,patient_id.is.null)`)
+        .or(doctorBankOrFilter())
         .order('title');
     const { data: overrides } = await supabaseClient
         .from('patient_media_flags').select('media_id, visible').eq('patient_id', patient.id);
@@ -12074,7 +12091,7 @@ async function openPatientBooksModal(patient) {
     // Inclui o banco do médico E o conteúdo global do admin.
     const { data: myBooks } = await supabaseClient
         .from('books').select('id, title, doctor_user_id')
-        .or(`doctor_user_id.eq.${currentUserId},and(doctor_user_id.is.null,company_id.is.null,patient_id.is.null)`)
+        .or(doctorBankOrFilter())
         .order('title');
     const { data: overrides } = await supabaseClient
         .from('patient_book_flags').select('book_id, visible').eq('patient_id', patient.id);
@@ -12816,7 +12833,7 @@ async function getOrCreateTopicFolderFork(sourceRecord) {
     if (existing) return existing;
 
     const { data: created, error } = await supabaseClient.from('topics')
-        .insert([{ folder: sourceRecord.folder, style_class: sourceRecord.styleClass, doctor_user_id: currentUserId, forked_from: sourceRecord.id }])
+        .insert([{ folder: sourceRecord.folder, style_class: sourceRecord.styleClass, doctor_user_id: currentUserId, company_id: currentUserCompanyId, forked_from: sourceRecord.id }])
         .select().single();
     if (error) throw error;
 
@@ -13187,7 +13204,7 @@ async function getOrCreateVirtueFolderFork(sourceRecord) {
     if (existing) return existing;
 
     const { data: created, error } = await supabaseClient.from('virtues')
-        .insert([{ folder: sourceRecord.folder, style_class: sourceRecord.styleClass, doctor_user_id: currentUserId, forked_from: sourceRecord.id }])
+        .insert([{ folder: sourceRecord.folder, style_class: sourceRecord.styleClass, doctor_user_id: currentUserId, company_id: currentUserCompanyId, forked_from: sourceRecord.id }])
         .select().single();
     if (error) throw error;
 
@@ -13333,7 +13350,7 @@ async function renderVirtueFolders() {
             const styleClass = colors[Math.floor(Math.random() * colors.length)];
             if (supabaseClient) {
                 const newVirtuePayload = { folder: name.trim(), style_class: styleClass };
-                if (isDoctor) newVirtuePayload.doctor_user_id = currentUserId;
+                if (isDoctor) { newVirtuePayload.doctor_user_id = currentUserId; newVirtuePayload.company_id = currentUserCompanyId; }
                 supabaseClient.from('virtues').insert([newVirtuePayload]).then(({ error }) => {
                     if (error) alert('Erro ao criar no Supabase: ' + error.message);
                     loadVirtuesAndRender();
@@ -13694,7 +13711,7 @@ function setupCardEditor() {
                 if (supabaseClient) {
                     try {
                         const newTopicPayload = { folder: word, style_class: styleClass };
-                        if (isDoctor) newTopicPayload.doctor_user_id = currentUserId;
+                        if (isDoctor) { newTopicPayload.doctor_user_id = currentUserId; newTopicPayload.company_id = currentUserCompanyId; }
                         await supabaseClient.from('topics').insert([newTopicPayload]);
                         loadTopicsAndRender();
                         closeCardEditor();

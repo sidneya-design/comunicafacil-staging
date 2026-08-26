@@ -46,6 +46,7 @@ supabase.auth.onAuthStateChange((event) => {
 // mexer num livro alheio da biblioteca geral.
 let currentUserId = null;
 let isEditorOrAdmin = false;
+let currentUserCompanyId = null;
 let currentUserInfoLoaded = false;
 async function ensureCurrentUserInfo() {
   if (currentUserInfoLoaded) return;
@@ -54,6 +55,11 @@ async function ensureCurrentUserInfo() {
   if (currentUserId) {
     const { data } = await supabase.rpc('is_editor_or_admin');
     isEditorOrAdmin = data === true;
+    // Grava em todo livro que o médico sobe, pra outros médicos da mesma
+    // empresa também verem (mesmo mecanismo de app.js/currentUserCompanyId).
+    const { data: memberRow } = await supabase
+      .from('company_members').select('company_id').eq('user_id', currentUserId).maybeSingle();
+    currentUserCompanyId = memberRow?.company_id || null;
   }
   currentUserInfoLoaded = true;
 }
@@ -367,7 +373,7 @@ async function uploadFile(file) {
       // paciente) quando quem sobe é médico de verdade. Admin/editor sobe
       // pro catálogo GLOBAL (todos os 3 campos nulos) — visível a todos os
       // médicos automaticamente, cada um libera pros próprios pacientes.
-      ...(isEditorOrAdmin ? {} : { doctor_user_id: currentUserId }),
+      ...(isEditorOrAdmin ? {} : { doctor_user_id: currentUserId, company_id: currentUserCompanyId }),
     });
 
     if (dbErr) return setStatus('❌ Erro ao salvar: ' + dbErr.message, 'error');
