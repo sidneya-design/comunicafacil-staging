@@ -2465,14 +2465,20 @@ let currentEditingAudioExerciseFromSupabase = false;
 
 async function saveAudioExerciseToDB(title, size, color, font, itemsArray, doctorUserId = null) {
     // Sobe (ou reaproveita, se o item não trocou o arquivo na edição) o áudio
-    // de cada palavra antes de gravar os itens — mesmo padrão de
-    // uploadToSupabaseStorage já usado pra imagem/áudio em outras telas.
+    // e a imagem opcional de cada palavra antes de gravar os itens — mesmo
+    // padrão de uploadToSupabaseStorage já usado pra imagem/áudio em outras
+    // telas. A imagem é opcional e nunca vem de busca automática (ARASAAC) —
+    // só do upload manual daqui, ver renderCurrentPlaylistItem.
     const resolvedItems = await Promise.all(itemsArray.map(async (item) => {
         let audioUrl = item.audioUrl || null;
         if (item.audioFile) {
             audioUrl = await uploadToSupabaseStorage('media_uploads', 'audios', item.audioFile);
         }
-        return { word: item.word, syllables: item.syllables, audioUrl, audioFile: item.audioFile || null };
+        let imageUrl = item.imageUrl || null;
+        if (item.imageFile) {
+            imageUrl = await uploadToSupabaseStorage('media_uploads', 'images', item.imageFile);
+        }
+        return { word: item.word, syllables: item.syllables, audioUrl, audioFile: item.audioFile || null, imageUrl, imageFile: item.imageFile || null };
     }));
 
     const shouldTrySupabase = supabaseClient && (!currentEditingAudioExerciseId || currentEditingAudioExerciseFromSupabase);
@@ -2495,7 +2501,7 @@ async function saveAudioExerciseToDB(title, size, color, font, itemsArray, docto
                 targetExerciseId = exData.id;
             }
 
-            const dbItems = resolvedItems.map(item => ({ exercise_id: targetExerciseId, word: item.word, syllables: item.syllables, audio_url: item.audioUrl, link: '' }));
+            const dbItems = resolvedItems.map(item => ({ exercise_id: targetExerciseId, word: item.word, syllables: item.syllables, audio_url: item.audioUrl, image_url: item.imageUrl, link: '' }));
             const { error: itemsErr } = await supabaseClient.from('exercise_items').insert(dbItems);
             if (itemsErr) throw itemsErr;
 
@@ -2507,7 +2513,7 @@ async function saveAudioExerciseToDB(title, size, color, font, itemsArray, docto
         }
     }
 
-    const localItems = resolvedItems.map(item => ({ word: item.word, syllables: item.syllables, audio_url: item.audioUrl, audioBlob: item.audioFile || undefined }));
+    const localItems = resolvedItems.map(item => ({ word: item.word, syllables: item.syllables, audio_url: item.audioUrl, audioBlob: item.audioFile || undefined, image_url: item.imageUrl, imageBlob: item.imageFile || undefined }));
     const localPayload = { title, items: localItems, visible: false, gameKind: 'audio-real', syllablesSize: size || null, syllablesColor: color || null, syllablesFont: font || null };
     if (currentEditingAudioExerciseId) {
         db.transaction(['exercises'], 'readonly').objectStore('exercises').get(currentEditingAudioExerciseId).onsuccess = (e) => {
@@ -3274,7 +3280,7 @@ function updateSyllablesBlockTitles() {
 // já tem um audio_url salvo — some assim que um novo arquivo é escolhido.
 let audioBlockCounter = 0;
 
-function createAudioItemBlockHtml(blockId, isEdit = false, hasExistingAudio = false) {
+function createAudioItemBlockHtml(blockId, isEdit = false, hasExistingAudio = false, hasExistingImage = false) {
     return `
         <div class="audio-item-block" data-block-id="${blockId}">
             <div class="block-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -3296,16 +3302,24 @@ function createAudioItemBlockHtml(blockId, isEdit = false, hasExistingAudio = fa
                     <i class="fas fa-check-circle" aria-hidden="true" style="color:#0d9488;"></i> Áudio já salvo — escolha um novo arquivo só se quiser substituir.
                 </span>
             </div>
+            <div class="form-group">
+                <label>Imagem (opcional)</label>
+                <input type="file" class="audio-item-image" accept="image/*">
+                <span class="image-current-hint" style="display:${hasExistingImage ? 'inline-block' : 'none'};font-size:13px;color:#666;margin-top:4px;">
+                    <i class="fas fa-check-circle" aria-hidden="true" style="color:#0d9488;"></i> Imagem já salva — escolha um novo arquivo só se quiser substituir.
+                </span>
+                <span style="display:block;font-size:12px;color:#999;margin-top:4px;">Sem imagem, mostra só a palavra em sílabas (sem busca automática de pictograma).</span>
+            </div>
         </div>
     `;
 }
 
-function addAudioItemBlock(isEdit = false, hasExistingAudio = false) {
+function addAudioItemBlock(isEdit = false, hasExistingAudio = false, hasExistingImage = false) {
     const container = document.getElementById('audio-items-container');
     const blockId = audioBlockCounter++;
 
     const wrapper = document.createElement('div');
-    wrapper.innerHTML = createAudioItemBlockHtml(blockId, isEdit, hasExistingAudio);
+    wrapper.innerHTML = createAudioItemBlockHtml(blockId, isEdit, hasExistingAudio, hasExistingImage);
     const blockEl = wrapper.firstElementChild;
 
     const removeBtn = blockEl.querySelector('.btn-remove-block');
@@ -3315,10 +3329,14 @@ function addAudioItemBlock(isEdit = false, hasExistingAudio = false) {
             updateAudioBlockTitles();
         });
     }
-    // Trocar o arquivo esconde o aviso de "áudio já salvo" — a nova escolha
-    // é o que vai valer no submit (ver handler do formulário).
+    // Trocar o arquivo esconde o aviso de "já salvo" — a nova escolha é o
+    // que vai valer no submit (ver handler do formulário).
     blockEl.querySelector('.audio-item-file').addEventListener('change', (e) => {
         const hint = blockEl.querySelector('.audio-current-hint');
+        if (hint && e.target.files[0]) hint.style.display = 'none';
+    });
+    blockEl.querySelector('.audio-item-image').addEventListener('change', (e) => {
+        const hint = blockEl.querySelector('.image-current-hint');
         if (hint && e.target.files[0]) hint.style.display = 'none';
     });
 
@@ -3334,12 +3352,14 @@ function updateAudioBlockTitles() {
 }
 
 let currentEditingAudioUrls = {};
+let currentEditingAudioImageUrls = {};
 
 function openEditAudioExercise(ex) {
     currentEditingAudioExerciseId = ex.id;
     currentEditingAudioExerciseFromSupabase = !!ex.fromSupabase;
     audioBlockCounter = 0;
     currentEditingAudioUrls = {};
+    currentEditingAudioImageUrls = {};
 
     document.getElementById('audio-exercise-modal').style.display = 'flex';
     document.getElementById('audio-exercise-modal').querySelector('h2').textContent = "Editar Exercício (Áudio Real)";
@@ -3359,11 +3379,13 @@ function openEditAudioExercise(ex) {
 
     ex.items.forEach((item, index) => {
         const hasExistingAudio = !!item.audio_url || item.audioBlob instanceof Blob;
-        addAudioItemBlock(true, hasExistingAudio);
+        const hasExistingImage = !!item.image_url || item.imageBlob instanceof Blob;
+        addAudioItemBlock(true, hasExistingAudio, hasExistingImage);
         const blockEl = container.querySelector(`[data-block-id="${index}"]`);
         blockEl.querySelector('.audio-item-word').value = item.word || '';
         blockEl.querySelector('.audio-item-syllables').value = item.syllables || '';
         if (item.audio_url) currentEditingAudioUrls[index] = item.audio_url;
+        if (item.image_url) currentEditingAudioImageUrls[index] = item.image_url;
     });
 }
 
@@ -4130,6 +4152,7 @@ function setupModals() {
         currentEditingAudioExerciseFromSupabase = false;
         audioBlockCounter = 0;
         currentEditingAudioUrls = {};
+        currentEditingAudioImageUrls = {};
 
         document.getElementById('audio-exercise-modal').style.display = 'flex';
         document.getElementById('audio-exercise-modal').querySelector('h2').textContent = "Novo Exercício (Áudio Real)";
@@ -4172,11 +4195,15 @@ function setupModals() {
             const audioFile = block.querySelector('.audio-item-file').files[0] || null;
             const audioUrl = !audioFile ? (currentEditingAudioUrls[blockId] || null) : null;
             if (!audioFile && !audioUrl) missingAudio = true;
+            const imageFile = block.querySelector('.audio-item-image').files[0] || null;
+            const imageUrl = !imageFile ? (currentEditingAudioImageUrls[blockId] || null) : null;
             itemsArray.push({
                 word: block.querySelector('.audio-item-word').value,
                 syllables: block.querySelector('.audio-item-syllables').value,
                 audioFile,
-                audioUrl
+                audioUrl,
+                imageFile,
+                imageUrl
             });
         });
         if (missingAudio) return alert("Toda palavra deste exercício precisa de um áudio gravado (.mp3 ou .wav).");
@@ -4340,12 +4367,16 @@ function renderCurrentPlaylistItem() {
         // (mesmo com white-space:nowrap, esse texto pode entrar num elemento
         // sem esse cuidado no futuro, então normaliza sempre).
         const displaySyllables = (item.syllables || '').replace(/[-.]/g, '.​');
+        // Exercício com Áudio Real aceita uma imagem própria opcional por
+        // palavra (upload manual) — quando presente, mostra ela com legenda
+        // de sílabas por cima (igual Exercício com Slides), em vez de
+        // substituir por sílabas grandes. Nunca busca pictograma do ARASAAC
+        // pra esse deck (ver ramo final do else abaixo).
+        const hasOwnImage = (item.imageBlob instanceof Blob) || !!item.image_url;
 
-        if (currentPlaylistDeckStyle) {
-            // Exercício de Sílabas dedicado (e Exercício com Áudio Real, que usa o
-            // mesmo deck style): sílabas substituem a imagem por completo, sem
-            // buscar pictograma nenhum — o gate é currentPlaylistDeckStyle (só
-            // esses dois game_kind setam ele), não a própria palavra ter sílabas.
+        if (currentPlaylistDeckStyle && !hasOwnImage) {
+            // Exercício de Sílabas dedicado (e Exercício com Áudio Real sem
+            // imagem própria): sílabas substituem a imagem por completo.
             imgEl.style.display = 'none';
             imgEl.src = '';
             captionEl.style.display = 'none';
@@ -4365,6 +4396,12 @@ function renderCurrentPlaylistItem() {
                 imgEl.src = URL.createObjectURL(item.imageBlob);
             } else if (item.image_url) {
                 imgEl.src = item.image_url;
+            } else if (currentPlaylistDeckStyle) {
+                // Inalcançável na prática (deckStyle+sem imagem já cai no ramo de
+                // cima), mas por segurança: Áudio Real/Sílabas nunca busca
+                // pictograma automático — só sílabas grandes ou upload manual.
+                imgEl.style.display = 'none';
+                imgEl.src = '';
             } else {
                 // Sem imagem própria nem ainda o pictograma do ARASAAC: esconde o
                 // <img> em vez de deixar src="" — um <img> com src vazio mostra o
@@ -4424,10 +4461,11 @@ function renderCurrentPlaylistItem() {
         // lenta. O navegador cacheia a imagem assim que o Image() carrega.
         const prevItem = currentPlaylistItems[currentPlaylistIndex - 1];
         [nextItem, prevItem].forEach(neighbor => {
-            // Só pula a imagem quando o deck SUBSTITUI ela de vez (Exercício de
-            // Sílabas ou de Áudio Real) — no Exercício com Slides, sílabas são só
-            // uma legenda sobre a foto, que continua precisando carregar.
-            if (!neighbor || currentPlaylistDeckStyle) return;
+            // Só pula a imagem quando o deck SUBSTITUI ela de vez (Sílabas, ou
+            // Áudio Real sem imagem própria) — com imagem própria (Áudio Real) ou
+            // no Exercício com Slides, a foto continua precisando carregar.
+            const neighborHasOwnImage = neighbor && ((neighbor.imageBlob instanceof Blob) || !!neighbor.image_url);
+            if (!neighbor || (currentPlaylistDeckStyle && !neighborHasOwnImage)) return;
             if (neighbor.image_url) {
                 const preloader = new Image();
                 preloader.src = neighbor.image_url;
