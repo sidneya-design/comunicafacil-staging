@@ -69,6 +69,14 @@ body {
 .sidebar::-webkit-scrollbar {
     display: none;
 }
+/* Evita o "pisca-pisca" de ícone bloqueado no refresh: applyModuleVisibility()
+   é assíncrono (consulta o Supabase) e só roda depois da sidebar já ter
+   desenhado — sem isso, todo módulo bloqueado aparecia visível por um
+   instante antes de sumir. Esconde por visibility (não display) pra não
+   mexer no layout; a classe some assim que a permissão real é conhecida. */
+.sidebar.modules-pending .nav-btn-gated {
+    visibility: hidden;
+}
 .nav-btn {
     background: transparent; border: none; color: #a0a0b0; display: flex; flex-direction: column;
     align-items: center; gap: 8px; padding: 15px 5px; border-radius: 12px; cursor: pointer; transition: all 0.2s;

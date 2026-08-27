@@ -1595,6 +1595,13 @@ function setAdminTab(tabName) {
 }
 
 function initApp() {
+    // Rede de segurança do anti-piscar da sidebar (ver .modules-pending em
+    // style.css): applyModuleVisibility() é quem normalmente revela os
+    // ícones, mas só roda dentro do fluxo de sessão do Supabase — sem essa
+    // rede, um cenário sem supabaseClient configurado deixaria a sidebar
+    // escondida pra sempre em vez de só piscar.
+    setTimeout(() => document.querySelector('.sidebar')?.classList.remove('modules-pending'), 4000);
+
     setupNavigation();
     setupUsageVisibilityHandling();
     initIndexedDB();
@@ -3496,10 +3503,30 @@ function selectAudioClip(index, autoplay) {
     drawWaveform([], 0);
     updateAudioProgressUI(0);
     document.getElementById('audio-time-duration').textContent = '0:00';
-    decodeAudioPeaks(clip).then(peaks => {
-        if (currentPlayingClipId === clip.id) drawWaveform(peaks, 0);
-    });
-    if (autoplay) audioPlayerEl.play().catch(() => {});
+
+    // A decodificação da onda faz um fetch() completo do MESMO arquivo que
+    // o <audio> está tentando bufferizar pra tocar — em arquivos grandes,
+    // as duas requisições competem pela mesma banda/conexão e atrasam o som
+    // de verdade começar. Adiar até o 'playing' (áudio já tocando de
+    // verdade) prioriza ouvir logo; a onda só aparece um instante depois.
+    const startWaveformDecode = () => {
+        decodeAudioPeaks(clip).then(peaks => {
+            if (currentPlayingClipId === clip.id) {
+                drawWaveform(peaks, audioPlayerEl.duration ? audioPlayerEl.currentTime / audioPlayerEl.duration : 0);
+            }
+        });
+    };
+    if (autoplay) {
+        audioPlayerEl.addEventListener('playing', startWaveformDecode, { once: true });
+        // Autoplay pode falhar (bloqueio do navegador) — se falhar, decodifica
+        // mesmo assim, senão a onda nunca apareceria.
+        audioPlayerEl.play().catch(() => {
+            audioPlayerEl.removeEventListener('playing', startWaveformDecode);
+            startWaveformDecode();
+        });
+    } else {
+        startWaveformDecode();
+    }
 }
 
 function formatAudioTime(seconds) {
@@ -5431,6 +5458,9 @@ async function applyModuleVisibility() {
         }
     });
     renderAdminModulesPanel(flags);
+    // Só agora (display já resolvido pra cada botão) revela a sidebar —
+    // evita o pisca-pisca de ícone bloqueado aparecendo antes de sumir.
+    document.querySelector('.sidebar')?.classList.remove('modules-pending');
 }
 
 function renderAdminModulesPanel(flags) {
