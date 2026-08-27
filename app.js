@@ -338,6 +338,7 @@ const USAGE_VIEW_LABELS = {
     'view-virtues': 'Fomes e Forças',
     'view-keyboard': 'Teclado',
     'view-media': 'Mídias',
+    'view-audio': 'Áudios',
     'view-exercises': 'Exercícios',
     'view-games': 'Jogos',
     'view-ia': 'IA',
@@ -766,6 +767,7 @@ function getSectionLabel(sectionId) {
         'view-virtues': 'Tela: Fomes e Forças',
         'view-keyboard': 'Tela: Teclado',
         'view-media': 'Tela: Mídias',
+        'view-audio': 'Tela: Áudios',
         'view-exercises': 'Tela: Exercícios',
         'view-games': 'Tela: Jogos',
         'view-ia': 'Tela: Assistente IA',
@@ -1598,6 +1600,7 @@ function initApp() {
     initIndexedDB();
     setupModals();
     setupCardEditor();
+    setupAudioModuleControls();
     renderGamesList();
     if (isCompleteSentenceLocalDemo()) {
         setTimeout(() => {
@@ -1657,7 +1660,7 @@ function setupNavigation() {
             
             // Oculta a barra de mensagens nas telas que não usam composição de frases.
             if (messageBar) {
-                if (targetView === 'view-topics' || targetView === 'view-virtues' || targetView === 'view-media' || targetView === 'view-ia' || targetView === 'view-exercises' || targetView === 'view-games' || targetView === 'view-admin' || targetView === 'view-books' || targetView === 'view-doctor-patients') {
+                if (targetView === 'view-topics' || targetView === 'view-virtues' || targetView === 'view-media' || targetView === 'view-audio' || targetView === 'view-ia' || targetView === 'view-exercises' || targetView === 'view-games' || targetView === 'view-admin' || targetView === 'view-books' || targetView === 'view-doctor-patients') {
                     messageBar.style.display = 'none';
                 } else {
                     messageBar.style.display = 'flex';
@@ -1674,6 +1677,10 @@ function setupNavigation() {
 
             if (targetView === 'view-books') {
                 refreshBooksFrameSrc();
+            }
+
+            if (targetView === 'view-audio') {
+                loadAudioClips();
             }
         });
     });
@@ -1991,10 +1998,11 @@ document.getElementById('btn-backspace').addEventListener('click', () => {
 // ----------------------------------------------------
 
 function initIndexedDB() {
-    const request = indexedDB.open('ComunicaDB', 10);
+    const request = indexedDB.open('ComunicaDB', 11);
     request.onupgradeneeded = (event) => {
         db = event.target.result;
         if (!db.objectStoreNames.contains('medias')) db.createObjectStore('medias', { keyPath: 'id', autoIncrement: true });
+        if (!db.objectStoreNames.contains('audios')) db.createObjectStore('audios', { keyPath: 'id', autoIncrement: true });
         if (db.objectStoreNames.contains('exercises')) db.deleteObjectStore('exercises');
         db.createObjectStore('exercises', { keyPath: 'id', autoIncrement: true });
         if (!db.objectStoreNames.contains('virtues')) db.createObjectStore('virtues', { keyPath: 'id', autoIncrement: true });
@@ -3287,6 +3295,479 @@ function getEmbedUrl(url) {
 }
 
 // ----------------------------------------------------
+// MÓDULO DE ÁUDIOS: banco de clipes + player com forma de onda clicável
+// ----------------------------------------------------
+
+let currentAudioClips = [];
+let audioClipOrder = []; // permutação dos índices de currentAudioClips (embaralhada quando shuffle está ligado)
+let currentAudioClipIndex = -1;
+let audioShuffleOn = false;
+let audioRepeatOn = false;
+const audioPeaksCache = new Map(); // clip.id -> array de picos de amplitude já decodificados
+const audioPlayerEl = new Audio();
+
+// Gravação da própria voz (prática: ouvir o clipe de referência, depois se
+// gravar tentando repetir) — vira um card próprio na grade, salvo só local
+// (IndexedDB, nunca Supabase), pra comparar com o áudio de referência.
+let audioMediaRecorder = null;
+let audioRecorderChunks = [];
+let isAudioRecording = false;
+let audioRecordStartedAt = 0;
+let audioRecordTimerInterval = null;
+
+async function loadAudioClips() {
+    let supabaseClips = [];
+    if (supabaseClient) {
+        try {
+            const { data, error } = await supabaseClient.from('audio_clips').select('*');
+            if (!error && data) {
+                supabaseClips = data.map(c => ({
+                    id: `sb:${c.id}`, rawId: c.id, fromSupabase: true,
+                    title: c.title, url: c.audio_url, visible: c.visible !== false,
+                    doctorUserId: c.doctor_user_id || null, companyId: c.company_id || null,
+                    colorClass: c.color_class || null
+                }));
+            }
+        } catch (e) {}
+    }
+
+    if (!db) { currentAudioClips = supabaseClips.filter(c => c.visible); renderAudioClipsGrid(); return; }
+    // Precisa do await/Promise aqui — sem isso, esta função (async) resolvia
+    // antes do getAll() terminar de verdade, e quem chamava loadAudioClips()
+    // esperando o resultado (ex.: saveRecordingLocally selecionando o card
+    // recém-criado) via .then()/await pegava currentAudioClips desatualizado.
+    await new Promise((resolve) => {
+        db.transaction(['audios'], 'readonly').objectStore('audios').getAll().onsuccess = (e) => {
+            const localClips = (e.target.result || []).map(c => ({
+                id: `local:${c.id}`, rawId: c.id, fromSupabase: false,
+                title: c.title, url: URL.createObjectURL(c.blob), visible: c.visible !== false,
+                doctorUserId: null, companyId: null, colorClass: c.colorClass || null,
+                isRecording: !!c.isRecording
+            }));
+            currentAudioClips = [...supabaseClips, ...localClips].filter(c => c.visible);
+            audioClipOrder = currentAudioClips.map((_, i) => i);
+            renderAudioClipsGrid();
+            resolve();
+        };
+    });
+}
+
+async function saveAudioClip(title, file, colorClass) {
+    if (supabaseClient) {
+        try {
+            const url = await uploadToSupabaseStorage('media_uploads', 'audio-clips', file);
+            const { error } = await supabaseClient.from('audio_clips').insert([{
+                title, audio_url: url, visible: true, color_class: colorClass || null,
+                doctor_user_id: currentUserId, company_id: currentUserCompanyId
+            }]);
+            if (error) throw error;
+            await loadAudioClips();
+            return;
+        } catch (e) {
+            console.warn('Erro ao salvar áudio no Supabase, caindo para local:', e);
+        }
+    }
+    await new Promise((resolve) => {
+        db.transaction(['audios'], 'readwrite').objectStore('audios')
+            .add({ title, blob: file, visible: true, colorClass: colorClass || null })
+            .onsuccess = () => loadAudioClips().then(resolve);
+    });
+}
+
+async function updateAudioClip(clip, title, file, colorClass) {
+    if (clip.fromSupabase && supabaseClient) {
+        const update = { title, color_class: colorClass || null };
+        if (file) update.audio_url = await uploadToSupabaseStorage('media_uploads', 'audio-clips', file);
+        const { error } = await supabaseClient.from('audio_clips').update(update).eq('id', clip.rawId);
+        if (error) throw error;
+        await loadAudioClips();
+        return;
+    }
+    await new Promise((resolve, reject) => {
+        const store = db.transaction(['audios'], 'readwrite').objectStore('audios');
+        const getReq = store.get(clip.rawId);
+        getReq.onsuccess = () => {
+            const rec = getReq.result;
+            if (!rec) { resolve(); return; }
+            rec.title = title;
+            rec.colorClass = colorClass || null;
+            if (file) rec.blob = file;
+            store.put(rec).onsuccess = () => loadAudioClips().then(resolve);
+        };
+        getReq.onerror = () => reject(getReq.error);
+    });
+}
+
+async function deleteAudioClip(clip) {
+    if (!confirm('Apagar este áudio?')) return;
+    if (clip.fromSupabase && supabaseClient) {
+        await supabaseClient.from('audio_clips').delete().eq('id', clip.rawId);
+    } else {
+        await new Promise((resolve) => {
+            db.transaction(['audios'], 'readwrite').objectStore('audios').delete(clip.rawId).onsuccess = resolve;
+        });
+    }
+    if (currentAudioClips[currentAudioClipIndex]?.id === clip.id) {
+        currentAudioClipIndex = -1;
+        audioPlayerEl.pause();
+        audioPlayerEl.removeAttribute('src');
+        drawWaveform([], 0);
+        updateAudioProgressUI(0);
+    }
+    await loadAudioClips();
+}
+
+function renderAudioClipsGrid() {
+    const container = document.getElementById('grid-audio-clips');
+    if (!container) return;
+    container.innerHTML = '';
+    currentAudioClips.forEach((clip, index) => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'audio-clip-card'
+            + (clip.isRecording ? ' audio-recording-card' : (clip.colorClass ? ` audio-color-${clip.colorClass}` : ''))
+            + (index === currentAudioClipIndex ? ' active' : '');
+        card.textContent = clip.title;
+        card.addEventListener('click', () => selectAudioClip(index, true));
+
+        if (clip.isRecording) {
+            const badge = document.createElement('span');
+            badge.className = 'audio-recording-badge';
+            badge.innerHTML = '<i class="fas fa-microphone" aria-hidden="true"></i>';
+            card.appendChild(badge);
+        }
+
+        // Admin edita/apaga qualquer clipe; médico só o próprio banco (dele
+        // ou da empresa); clipe local (sem Supabase) que não é gravação é
+        // sempre editável, já que só existe no navegador de quem subiu. Uma
+        // gravação própria (qualquer papel, inclusive paciente) sempre pode
+        // ser apagada — é prática pessoal, sem edição de título/cor (não faz
+        // sentido "categorizar" a própria tentativa).
+        const canManage = isAdmin || (isDoctor && (!clip.fromSupabase || clip.companyId === currentUserCompanyId));
+        if (clip.isRecording) {
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'delete-media-btn';
+            delBtn.innerHTML = '<i class="fas fa-trash" aria-hidden="true"></i>';
+            delBtn.setAttribute('aria-label', 'Excluir');
+            delBtn.onclick = (ev) => { ev.stopPropagation(); deleteAudioClip(clip); };
+            card.appendChild(delBtn);
+        } else if (canManage) {
+            const editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'edit-media-btn';
+            editBtn.innerHTML = '<i class="fas fa-pencil-alt" aria-hidden="true"></i>';
+            editBtn.setAttribute('aria-label', 'Editar');
+            editBtn.onclick = (ev) => { ev.stopPropagation(); openAudioClipEditor(clip); };
+            card.appendChild(editBtn);
+
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'delete-media-btn';
+            delBtn.innerHTML = '<i class="fas fa-trash" aria-hidden="true"></i>';
+            delBtn.setAttribute('aria-label', 'Excluir');
+            delBtn.onclick = (ev) => { ev.stopPropagation(); deleteAudioClip(clip); };
+            card.appendChild(delBtn);
+        }
+        container.appendChild(card);
+    });
+}
+
+let currentEditingAudioClip = null;
+function openAudioClipEditor(clip) {
+    currentEditingAudioClip = clip;
+    document.getElementById('audio-upload-modal-title').textContent = 'Editar Áudio';
+    document.querySelector('#audio-upload-form button[type="submit"]').textContent = 'Salvar Alterações';
+    document.getElementById('audio-clip-title').value = clip.title;
+    document.getElementById('audio-clip-color').value = clip.colorClass ? `color-${clip.colorClass}` : '';
+    document.getElementById('audio-clip-file').removeAttribute('required');
+    document.getElementById('audio-upload-modal').style.display = 'flex';
+}
+
+let currentPlayingClipId = null; // id no audioPeaksCache do que está carregado agora (clipe da grade OU gravação)
+
+function selectAudioClip(index, autoplay) {
+    const clip = currentAudioClips[index];
+    if (!clip) return;
+    currentAudioClipIndex = index;
+    currentPlayingClipId = clip.id;
+    renderAudioClipsGrid();
+    audioPlayerEl.src = clip.url;
+    drawWaveform([], 0);
+    updateAudioProgressUI(0);
+    document.getElementById('audio-time-duration').textContent = '0:00';
+    decodeAudioPeaks(clip).then(peaks => {
+        if (currentPlayingClipId === clip.id) drawWaveform(peaks, 0);
+    });
+    if (autoplay) audioPlayerEl.play().catch(() => {});
+}
+
+function formatAudioTime(seconds) {
+    if (!isFinite(seconds) || seconds < 0) return '0:00';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+}
+
+// Atualiza onda, barra de progresso e tempo decorrido a partir de uma única
+// fração (0-1) — usado tanto pelo playback normal (timeupdate) quanto pelo
+// clique/arraste na onda ou na barra, pra tudo ficar sempre em sincronia.
+function updateAudioProgressUI(fraction) {
+    const peaks = currentPlayingClipId ? audioPeaksCache.get(currentPlayingClipId) : null;
+    if (peaks) drawWaveform(peaks, fraction);
+    const fill = document.getElementById('audio-progress-fill');
+    const thumb = document.getElementById('audio-progress-thumb');
+    if (fill) fill.style.width = (fraction * 100) + '%';
+    if (thumb) thumb.style.left = (fraction * 100) + '%';
+    const currentLabel = document.getElementById('audio-time-current');
+    if (currentLabel) currentLabel.textContent = formatAudioTime(audioPlayerEl.duration ? fraction * audioPlayerEl.duration : 0);
+}
+
+function seekAudioToFraction(fraction) {
+    if (!audioPlayerEl.duration) return;
+    fraction = Math.min(1, Math.max(0, fraction));
+    audioPlayerEl.currentTime = fraction * audioPlayerEl.duration;
+    updateAudioProgressUI(fraction);
+}
+
+// Decodifica o áudio real (Web Audio API) e reduz a onda a ~220 picos de
+// amplitude máxima por bloco — é a forma de onda de verdade do arquivo, não
+// uma decoração aleatória, porque o pedido era poder "analisar" o áudio.
+async function decodeAudioPeaks(clip) {
+    if (audioPeaksCache.has(clip.id)) return audioPeaksCache.get(clip.id);
+    try {
+        const response = await fetch(clip.url);
+        const arrayBuffer = await response.arrayBuffer();
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+        const channelData = audioBuffer.getChannelData(0);
+        const peakCount = 220;
+        const blockSize = Math.max(1, Math.floor(channelData.length / peakCount));
+        const peaks = [];
+        for (let i = 0; i < peakCount; i++) {
+            const start = i * blockSize;
+            let max = 0;
+            for (let j = 0; j < blockSize && (start + j) < channelData.length; j++) {
+                const abs = Math.abs(channelData[start + j]);
+                if (abs > max) max = abs;
+            }
+            peaks.push(max);
+        }
+        ctx.close();
+        // Normaliza pelo pico mais alto da própria gravação — sem isso, um
+        // áudio gravado num volume mais baixo (a maioria não chega a 1.0 de
+        // amplitude) desenha barras pequenas no meio do canvas, com espaço
+        // em branco sobrando em cima/embaixo em vez de usar a altura toda.
+        const maxPeak = Math.max(...peaks, 0.0001);
+        const normalizedPeaks = peaks.map(p => p / maxPeak);
+        audioPeaksCache.set(clip.id, normalizedPeaks);
+        return normalizedPeaks;
+    } catch (e) {
+        console.warn('Não foi possível decodificar a forma de onda:', e);
+        return [];
+    }
+}
+
+function drawWaveform(peaks, progressFraction) {
+    const canvas = document.getElementById('audio-waveform-canvas');
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth || 1;
+    const height = canvas.clientHeight || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    if (!peaks.length) return;
+
+    const barWidth = width / peaks.length;
+    const midY = height / 2;
+    const progressX = width * progressFraction;
+    const styles = getComputedStyle(document.documentElement);
+    const playedColor = styles.getPropertyValue('--audio-waveform-played').trim() || '#2fb8af';
+    const baseColor = styles.getPropertyValue('--audio-waveform-base').trim() || '#c7d3d6';
+
+    peaks.forEach((peak, i) => {
+        const barHeight = Math.max(2, peak * height);
+        const x = i * barWidth;
+        ctx.fillStyle = x < progressX ? playedColor : baseColor;
+        ctx.fillRect(x, midY - barHeight / 2, Math.max(1, barWidth - 1), barHeight);
+    });
+}
+
+function seekFromElementEvent(el, evt) {
+    if (!el || !audioPlayerEl.duration) return;
+    const rect = el.getBoundingClientRect();
+    const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+    const fraction = (clientX - rect.left) / rect.width;
+    seekAudioToFraction(fraction);
+}
+
+function goToAdjacentAudioClip(direction, autoplay) {
+    if (!currentAudioClips.length) return;
+    const currentPos = audioClipOrder.indexOf(currentAudioClipIndex);
+    let nextPos = currentPos + direction;
+    if (nextPos < 0) nextPos = audioClipOrder.length - 1;
+    if (nextPos >= audioClipOrder.length) {
+        if (!audioRepeatOn) return;
+        nextPos = 0;
+    }
+    selectAudioClip(audioClipOrder[nextPos], autoplay);
+}
+
+function shuffleAudioOrder() {
+    audioClipOrder = currentAudioClips.map((_, i) => i);
+    for (let i = audioClipOrder.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [audioClipOrder[i], audioClipOrder[j]] = [audioClipOrder[j], audioClipOrder[i]];
+    }
+}
+
+function setAudioPlayButtonIcon(isPlaying) {
+    const btn = document.getElementById('btn-audio-play');
+    if (!btn) return;
+    btn.innerHTML = isPlaying
+        ? '<i class="fas fa-pause" aria-hidden="true"></i>'
+        : '<i class="fas fa-play" aria-hidden="true"></i>';
+}
+
+async function toggleAudioRecording() {
+    if (isAudioRecording) {
+        audioMediaRecorder.stop();
+        return;
+    }
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+        alert('Seu navegador não suporta gravação de áudio.');
+        return;
+    }
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+        });
+    } catch (e) {
+        alert('Não foi possível acessar o microfone. Verifique a permissão do navegador.');
+        return;
+    }
+    audioPlayerEl.pause(); // não grava por cima do que está tocando
+    audioRecorderChunks = [];
+    audioMediaRecorder = new MediaRecorder(stream);
+    audioMediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioRecorderChunks.push(e.data); };
+    audioMediaRecorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        isAudioRecording = false;
+        setAudioRecordButtonState(false);
+        clearInterval(audioRecordTimerInterval);
+        document.getElementById('audio-record-timer').textContent = '';
+        const blob = new Blob(audioRecorderChunks, { type: audioMediaRecorder.mimeType || 'audio/webm' });
+        saveRecordingLocally(blob);
+    };
+    audioMediaRecorder.start();
+    isAudioRecording = true;
+    setAudioRecordButtonState(true);
+    audioRecordStartedAt = Date.now();
+    audioRecordTimerInterval = setInterval(() => {
+        document.getElementById('audio-record-timer').textContent = formatAudioTime((Date.now() - audioRecordStartedAt) / 1000);
+    }, 200);
+}
+
+function setAudioRecordButtonState(recording) {
+    const btn = document.getElementById('btn-audio-record');
+    if (!btn) return;
+    btn.classList.toggle('recording', recording);
+    btn.innerHTML = recording
+        ? '<i class="fas fa-stop" aria-hidden="true"></i><span>Parar gravação</span>'
+        : '<i class="fas fa-microphone" aria-hidden="true"></i><span>Gravar minha voz</span>';
+    btn.setAttribute('aria-label', recording ? 'Parar gravação' : 'Gravar minha voz');
+}
+
+// Grava a tentativa da pessoa como um card PRÓPRIO, só local (IndexedDB —
+// nunca vai pro Supabase/banco do médico, é prática pessoal), pra ficar na
+// tela e dar pra comparar com o áudio de referência quantas vezes quiser,
+// não só na hora. Sempre cai no armazenamento local, mesmo com Supabase
+// configurado — grava a mesma coisa mesmo que a pessoa esteja offline.
+async function saveRecordingLocally(blob) {
+    await new Promise((resolve) => {
+        db.transaction(['audios'], 'readwrite').objectStore('audios')
+            .add({ title: 'Minha gravação', blob, visible: true, isRecording: true })
+            .onsuccess = (e) => {
+                const newRawId = e.target.result;
+                loadAudioClips().then(() => {
+                    const idx = currentAudioClips.findIndex(c => c.rawId === newRawId && !c.fromSupabase);
+                    if (idx !== -1) selectAudioClip(idx, true);
+                    resolve();
+                });
+            };
+    });
+}
+
+function setupAudioModuleControls() {
+    const canvas = document.getElementById('audio-waveform-canvas');
+    const progressTrack = document.getElementById('audio-progress-track');
+    let draggingEl = null;
+    const startDrag = (el, e) => { draggingEl = el; el.classList.add('dragging'); seekFromElementEvent(el, e); };
+    const dragMove = (e) => { if (draggingEl) seekFromElementEvent(draggingEl, e); };
+    const endDrag = () => { if (draggingEl) draggingEl.classList.remove('dragging'); draggingEl = null; };
+
+    [canvas, progressTrack].forEach((el) => {
+        el.addEventListener('mousedown', (e) => startDrag(el, e));
+        el.addEventListener('touchstart', (e) => startDrag(el, e));
+    });
+    window.addEventListener('mousemove', dragMove);
+    window.addEventListener('touchmove', dragMove);
+    window.addEventListener('mouseup', endDrag);
+    window.addEventListener('touchend', endDrag);
+
+    document.getElementById('btn-audio-play').addEventListener('click', () => {
+        if (currentAudioClipIndex === -1) {
+            if (currentAudioClips.length) selectAudioClip(audioClipOrder[0], true);
+            return;
+        }
+        if (audioPlayerEl.paused) audioPlayerEl.play(); else audioPlayerEl.pause();
+    });
+    document.getElementById('btn-audio-prev').addEventListener('click', () => goToAdjacentAudioClip(-1, true));
+    document.getElementById('btn-audio-next').addEventListener('click', () => goToAdjacentAudioClip(1, true));
+    document.getElementById('btn-audio-shuffle').addEventListener('click', (e) => {
+        audioShuffleOn = !audioShuffleOn;
+        e.currentTarget.classList.toggle('active', audioShuffleOn);
+        e.currentTarget.setAttribute('aria-pressed', String(audioShuffleOn));
+        audioClipOrder = currentAudioClips.map((_, i) => i);
+        if (audioShuffleOn) shuffleAudioOrder();
+    });
+    document.getElementById('btn-audio-repeat').addEventListener('click', (e) => {
+        audioRepeatOn = !audioRepeatOn;
+        e.currentTarget.classList.toggle('active', audioRepeatOn);
+        e.currentTarget.setAttribute('aria-pressed', String(audioRepeatOn));
+    });
+
+    document.getElementById('btn-audio-record').addEventListener('click', toggleAudioRecording);
+
+    audioPlayerEl.addEventListener('timeupdate', () => {
+        if (!audioPlayerEl.duration || draggingEl) return;
+        updateAudioProgressUI(audioPlayerEl.currentTime / audioPlayerEl.duration);
+    });
+    audioPlayerEl.addEventListener('loadedmetadata', () => {
+        const durationLabel = document.getElementById('audio-time-duration');
+        if (durationLabel) durationLabel.textContent = formatAudioTime(audioPlayerEl.duration);
+    });
+    audioPlayerEl.addEventListener('play', () => setAudioPlayButtonIcon(true));
+    audioPlayerEl.addEventListener('pause', () => setAudioPlayButtonIcon(false));
+    audioPlayerEl.addEventListener('ended', () => {
+        if (audioRepeatOn && audioClipOrder.length === 1) {
+            audioPlayerEl.currentTime = 0;
+            audioPlayerEl.play();
+        } else {
+            goToAdjacentAudioClip(1, true);
+        }
+    });
+
+    window.addEventListener('resize', () => {
+        updateAudioProgressUI(audioPlayerEl.duration ? audioPlayerEl.currentTime / audioPlayerEl.duration : 0);
+    });
+}
+
+// ----------------------------------------------------
 // MODAIS, PLAYLISTS E EDIÇÃO
 // ----------------------------------------------------
 
@@ -4001,6 +4482,51 @@ function setupModals() {
     };
     document.getElementById('btn-close-upload').addEventListener('click', closeUpload);
     document.getElementById('btn-cancel-upload').addEventListener('click', closeUpload);
+
+    document.getElementById('btn-open-audio-upload').addEventListener('click', () => {
+        if (!isAdmin && !isDoctor) return;
+        currentEditingAudioClip = null;
+        document.getElementById('audio-upload-form').reset();
+        document.getElementById('audio-upload-modal-title').textContent = 'Novo Áudio';
+        document.querySelector('#audio-upload-form button[type="submit"]').textContent = 'Salvar Áudio';
+        document.getElementById('audio-clip-file').setAttribute('required', 'required');
+        document.getElementById('audio-upload-modal').style.display = 'flex';
+    });
+    const closeAudioUpload = () => {
+        document.getElementById('audio-upload-modal').style.display = 'none';
+        document.getElementById('audio-upload-form').reset();
+        document.getElementById('audio-upload-modal-title').textContent = 'Novo Áudio';
+        document.querySelector('#audio-upload-form button[type="submit"]').textContent = 'Salvar Áudio';
+        document.getElementById('audio-clip-file').setAttribute('required', 'required');
+        currentEditingAudioClip = null;
+    };
+    document.getElementById('btn-close-audio-upload').addEventListener('click', closeAudioUpload);
+    document.getElementById('btn-cancel-audio-upload').addEventListener('click', closeAudioUpload);
+    document.getElementById('audio-upload-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!isAdmin && !isDoctor) {
+            alert('Apenas administradores ou médicos podem adicionar áudios.');
+            return;
+        }
+        const title = document.getElementById('audio-clip-title').value.trim();
+        const file = document.getElementById('audio-clip-file').files[0] || null;
+        const colorValue = document.getElementById('audio-clip-color').value;
+        const colorClass = colorValue ? colorValue.split('-')[1] : null;
+        if (!title) { alert('Por favor informe um título para o áudio.'); return; }
+        if (!currentEditingAudioClip && !file) { alert('Selecione um arquivo de áudio.'); return; }
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        try {
+            if (currentEditingAudioClip) {
+                await updateAudioClip(currentEditingAudioClip, title, file, colorClass);
+            } else {
+                await saveAudioClip(title, file, colorClass);
+            }
+            closeAudioUpload();
+        } finally {
+            submitBtn.disabled = false;
+        }
+    });
 
     const mediaSourceRadios = document.querySelectorAll('input[name="media-source"]');
     const mediaFileGroup = document.getElementById('media-file-group');
@@ -4804,6 +5330,7 @@ const ALL_MODULES = [
     { id: 'view-virtues', name: 'Fomes e Forças', icon: 'fa-star' },
     { id: 'view-keyboard', name: 'Teclado', icon: 'fa-keyboard' },
     { id: 'view-media', name: 'Mídias', icon: 'fa-play-circle' },
+    { id: 'view-audio', name: 'Áudios', icon: 'fa-headphones' },
     { id: 'view-books', name: 'Livros', icon: 'fa-book' },
     { id: 'view-exercises', name: 'Exercícios', icon: 'fa-dumbbell' },
     { id: 'view-games', name: 'Jogos', icon: 'fa-gamepad' },
@@ -12537,16 +13064,19 @@ function showEditBars() {
         // abaixo (também visíveis pro médico dentro do contexto de um
         // paciente, Fases 5b/6b) — sem essa exceção, este laço reesconderia
         // os botões de "Novo Exercício"/"Adicionar Mídia" deles.
-        if (header.id === 'exercises-header' || header.id === 'media-upload-header') return;
+        if (header.id === 'exercises-header' || header.id === 'media-upload-header' || header.id === 'audio-upload-header') return;
         header.style.display = isAdmin ? 'flex' : 'none';
     });
-    // exercises-header/media-upload-header ficam liberados pro médico
-    // sempre (não só depois de entrar via "Meus Pacientes") — Fase 19: sem
-    // paciente selecionado, a mídia vai pro banco próprio do médico.
+    // exercises-header/media-upload-header/audio-upload-header ficam
+    // liberados pro médico sempre (não só depois de entrar via "Meus
+    // Pacientes") — Fase 19: sem paciente selecionado, o conteúdo vai pro
+    // banco próprio do médico.
     const exercisesHeader = document.getElementById('exercises-header');
     if (exercisesHeader) exercisesHeader.style.display = (isAdmin || isDoctor) ? 'flex' : 'none';
     const mediaHeader = document.getElementById('media-upload-header');
     if (mediaHeader) mediaHeader.style.display = (isAdmin || isDoctor) ? 'flex' : 'none';
+    const audioHeader = document.getElementById('audio-upload-header');
+    if (audioHeader) audioHeader.style.display = (isAdmin || isDoctor) ? 'flex' : 'none';
     // Médico também gerencia o próprio container de perguntas (Fase 13);
     // notificar por e-mail é um broadcast pra TODOS os usuários do sistema,
     // continua exclusivo do admin.

@@ -49,6 +49,10 @@
                 <i class="fas fa-play-circle" aria-hidden="true"></i>
                 <span>Mídias</span>
             </button>
+            <button class="nav-btn" data-view="view-audio" aria-pressed="false">
+                <i class="fas fa-headphones" aria-hidden="true"></i>
+                <span>Áudios</span>
+            </button>
             <button class="nav-btn" id="books-tab" data-view="view-books" aria-pressed="false">
                 <i class="fas fa-book" aria-hidden="true"></i>
                 <span>Livros</span>
@@ -180,6 +184,54 @@
                         <button type="button" id="btn-clear-patient-context-media" class="btn-secondary" style="padding:4px 10px;">Sair do modo paciente</button>
                     </div>
                     <div class="grid-container" id="grid-media"></div>
+                </main>
+
+                <!-- Tela: Áudios -->
+                <main class="view-section" id="view-audio">
+                    <div class="media-header" id="audio-upload-header">
+                        <button class="add-media-btn" id="btn-open-audio-upload">
+                            <i class="fas fa-plus-circle" aria-hidden="true"></i> Adicionar Áudio
+                        </button>
+                        <p class="media-hint">Monte um banco de clipes curtos para praticar com o paciente.</p>
+                    </div>
+                    <div class="audio-module-layout">
+                        <div class="grid-container audio-clips-grid" id="grid-audio-clips"></div>
+                        <div class="audio-player-panel" id="audio-player-panel">
+                            <canvas id="audio-waveform-canvas"></canvas>
+                            <div class="audio-progress-row">
+                                <span class="audio-time" id="audio-time-current">0:00</span>
+                                <div class="audio-progress-track" id="audio-progress-track">
+                                    <div class="audio-progress-fill" id="audio-progress-fill"></div>
+                                    <div class="audio-progress-thumb" id="audio-progress-thumb"></div>
+                                </div>
+                                <span class="audio-time" id="audio-time-duration">0:00</span>
+                            </div>
+                            <div class="audio-record-row">
+                                <button type="button" id="btn-audio-record" class="audio-record-btn" aria-label="Gravar minha voz">
+                                    <i class="fas fa-microphone" aria-hidden="true"></i>
+                                    <span id="audio-record-btn-label">Gravar minha voz</span>
+                                </button>
+                                <span class="audio-record-timer" id="audio-record-timer"></span>
+                            </div>
+                            <div class="audio-controls-bar">
+                                <button type="button" id="btn-audio-shuffle" class="audio-control-btn" aria-label="Aleatório" aria-pressed="false">
+                                    <i class="fas fa-random" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" id="btn-audio-prev" class="audio-control-btn" aria-label="Anterior">
+                                    <i class="fas fa-step-backward" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" id="btn-audio-play" class="audio-control-btn audio-control-btn-play" aria-label="Reproduzir">
+                                    <i class="fas fa-play" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" id="btn-audio-next" class="audio-control-btn" aria-label="Próximo">
+                                    <i class="fas fa-step-forward" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" id="btn-audio-repeat" class="audio-control-btn" aria-label="Repetir" aria-pressed="false">
+                                    <i class="fas fa-redo" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </main>
 
                 <!-- Tela: Livros -->
@@ -1293,6 +1345,43 @@
         </div>
     </div>
 
+    <!-- Modal de Upload de Áudio -->
+    <div class="modal-overlay" id="audio-upload-modal" role="dialog" aria-modal="true" aria-labelledby="audio-upload-modal-title">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="audio-upload-modal-title">Novo Áudio</h2>
+                <button class="close-modal-btn" id="btn-close-audio-upload" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
+            </div>
+            <form id="audio-upload-form">
+                <div class="form-group">
+                    <label for="audio-clip-title">Título</label>
+                    <input type="text" id="audio-clip-title" required>
+                </div>
+                <div class="form-group">
+                    <label for="audio-clip-file">Arquivo de Áudio</label>
+                    <input type="file" id="audio-clip-file" accept="audio/*" required>
+                </div>
+                <div class="form-group">
+                    <label for="audio-clip-color">Categoria (cor)</label>
+                    <select id="audio-clip-color">
+                        <option value="">Sem categoria</option>
+                        <option value="color-orange">Laranja</option>
+                        <option value="color-blue">Azul</option>
+                        <option value="color-green">Verde</option>
+                        <option value="color-red">Vermelho</option>
+                        <option value="color-yellow">Amarelo</option>
+                        <option value="color-pink">Rosa</option>
+                        <option value="color-gray">Cinza</option>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" id="btn-cancel-audio-upload">Cancelar</button>
+                    <button type="submit" class="btn-primary">Salvar Áudio</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Escolha do tipo de exercício -->
     <div class="modal-overlay" id="exercise-type-modal" role="dialog" aria-modal="true" aria-labelledby="exercise-type-modal-title">
         <div class="modal-content exercise-type-modal-content">
@@ -1976,12 +2065,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=27">
+    <link rel="stylesheet" href="style.css?v=36">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=67"></script>
+    <script defer src="app.js?v=76"></script>
 </body>
 
 
