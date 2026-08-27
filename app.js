@@ -3306,6 +3306,7 @@ function getEmbedUrl(url) {
 // ----------------------------------------------------
 
 let currentAudioClips = [];
+let audioFilterQuery = '';
 let audioClipOrder = []; // permutação dos índices de currentAudioClips (embaralhada quando shuffle está ligado)
 let currentAudioClipIndex = -1;
 let audioShuffleOn = false;
@@ -3428,7 +3429,12 @@ function renderAudioClipsGrid() {
     const container = document.getElementById('grid-audio-clips');
     if (!container) return;
     container.innerHTML = '';
+    document.getElementById('audio-filter-bar')?.style.setProperty('display', currentAudioClips.length ? 'flex' : 'none');
     currentAudioClips.forEach((clip, index) => {
+        // Índice preservado de propósito (skip em vez de .filter()) — é o
+        // mesmo índice usado por seleção/prev-next/shuffle, não pode mudar
+        // conforme a busca esconde cards.
+        if (audioFilterQuery.trim() && !titleMatchesQuery(clip.title, audioFilterQuery)) return;
         const card = document.createElement('button');
         card.type = 'button';
         card.className = 'audio-clip-card'
@@ -3714,10 +3720,20 @@ function setAudioRecordButtonState(recording) {
 // tela e dar pra comparar com o áudio de referência quantas vezes quiser,
 // não só na hora. Sempre cai no armazenamento local, mesmo com Supabase
 // configurado — grava a mesma coisa mesmo que a pessoa esteja offline.
+// "Minha gravação" sozinho fica ambíguo quando a pessoa grava mais de uma
+// vez (não sobrescreve, cada tentativa vira um card novo) — data/hora curta
+// deixa fácil saber qual é qual sem abrir cada uma.
+function formatRecordingTimestamp() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(now.getDate())}/${pad(now.getMonth() + 1)} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
 async function saveRecordingLocally(blob) {
+    const title = `Minha gravação — ${formatRecordingTimestamp()}`;
     await new Promise((resolve) => {
         db.transaction(['audios'], 'readwrite').objectStore('audios')
-            .add({ title: 'Minha gravação', blob, visible: true, isRecording: true })
+            .add({ title, blob, visible: true, isRecording: true })
             .onsuccess = (e) => {
                 const newRawId = e.target.result;
                 loadAudioClips().then(() => {
@@ -3730,6 +3746,11 @@ async function saveRecordingLocally(blob) {
 }
 
 function setupAudioModuleControls() {
+    document.getElementById('audio-filter-search')?.addEventListener('input', (e) => {
+        audioFilterQuery = e.target.value;
+        renderAudioClipsGrid();
+    });
+
     const canvas = document.getElementById('audio-waveform-canvas');
     const progressTrack = document.getElementById('audio-progress-track');
     let draggingEl = null;
@@ -3769,6 +3790,39 @@ function setupAudioModuleControls() {
     });
 
     document.getElementById('btn-audio-record').addEventListener('click', toggleAudioRecording);
+
+    // Velocidade fica no próprio elemento <audio> (não reseta ao trocar de
+    // clipe, já que é o mesmo elemento reaproveitado entre seleções).
+    const audioSpeedSteps = [1, 0.75, 0.5, 1.25];
+    let audioSpeedIndex = 0;
+    document.getElementById('btn-audio-speed').addEventListener('click', (e) => {
+        audioSpeedIndex = (audioSpeedIndex + 1) % audioSpeedSteps.length;
+        const rate = audioSpeedSteps[audioSpeedIndex];
+        audioPlayerEl.playbackRate = rate;
+        e.currentTarget.textContent = rate + 'x';
+        e.currentTarget.classList.toggle('active', rate !== 1);
+    });
+
+    // Atalhos de teclado: só quando a aba Áudios está aberta e o foco não
+    // está num campo de texto (senão espaço/setas atrapalhariam digitação
+    // na busca ou no título do modal de upload).
+    document.addEventListener('keydown', (e) => {
+        const audioView = document.getElementById('view-audio');
+        if (!audioView || !audioView.classList.contains('active')) return;
+        const tag = (e.target.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+        if (e.code === 'Space') {
+            e.preventDefault();
+            document.getElementById('btn-audio-play')?.click();
+        } else if (e.code === 'ArrowRight' && audioPlayerEl.duration) {
+            e.preventDefault();
+            seekAudioToFraction((audioPlayerEl.currentTime + 5) / audioPlayerEl.duration);
+        } else if (e.code === 'ArrowLeft' && audioPlayerEl.duration) {
+            e.preventDefault();
+            seekAudioToFraction((audioPlayerEl.currentTime - 5) / audioPlayerEl.duration);
+        }
+    });
 
     audioPlayerEl.addEventListener('timeupdate', () => {
         if (!audioPlayerEl.duration || draggingEl) return;

@@ -502,6 +502,8 @@ body {
 }
 .audio-control-btn-play:hover { background: white; opacity: 1; filter: brightness(0.92); }
 .audio-control-btn-play:active { transform: scale(0.92); }
+.audio-speed-btn { width: auto; min-width: 40px; padding: 0 10px; border-radius: 999px; font-size: 13px; font-weight: bold; }
+.audio-speed-btn.active { color: var(--audio-accent); opacity: 1; }
 
 /* Celular: lado a lado não cabe — empilha grade em cima, player embaixo,
    cada um com sua própria altura fixa (em vez de dividir 480px ao meio). */
@@ -512,6 +514,7 @@ body {
     .audio-controls-bar { gap: 8px; padding: 12px; }
     .audio-control-btn { width: 36px; height: 36px; font-size: 16px; }
     .audio-control-btn-play { width: 48px; height: 48px; font-size: 18px; }
+    .audio-speed-btn { width: auto; min-width: 36px; height: 36px; padding: 0 8px; font-size: 12px; }
 }
 
 /* PAINEL ADMIN (gestão de usuários) */

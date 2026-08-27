@@ -194,6 +194,12 @@
                         </button>
                         <p class="media-hint">Monte um banco de clipes curtos para praticar com o paciente.</p>
                     </div>
+                    <div id="audio-filter-bar" class="exercise-filter-bar" style="display:none;">
+                        <div class="exercise-filter-search-wrap">
+                            <i class="fas fa-search" aria-hidden="true"></i>
+                            <input type="text" id="audio-filter-search" placeholder="Buscar por nome...">
+                        </div>
+                    </div>
                     <div class="audio-module-layout">
                         <div class="grid-container audio-clips-grid" id="grid-audio-clips"></div>
                         <div class="audio-player-panel" id="audio-player-panel">
@@ -229,6 +235,7 @@
                                 <button type="button" id="btn-audio-repeat" class="audio-control-btn" aria-label="Repetir" aria-pressed="false">
                                     <i class="fas fa-redo" aria-hidden="true"></i>
                                 </button>
+                                <button type="button" id="btn-audio-speed" class="audio-control-btn audio-speed-btn" aria-label="Velocidade de reprodução">1x</button>
                             </div>
                         </div>
                     </div>
@@ -2065,12 +2072,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=37">
+    <link rel="stylesheet" href="style.css?v=38">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=77"></script>
+    <script defer src="app.js?v=78"></script>
 </body>
 
 
