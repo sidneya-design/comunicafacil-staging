@@ -3351,24 +3351,35 @@ function loadCompareSlot(letter) {
     const titleEl = document.getElementById(`audio-compare-title-${letter.toLowerCase()}`);
     const canvasId = `audio-compare-canvas-${letter.toLowerCase()}`;
     const playBtn = document.getElementById(`btn-audio-compare-play-${letter.toLowerCase()}`);
+    const clearBtn = document.getElementById(`btn-audio-compare-clear-${letter.toLowerCase()}`);
     player.pause();
     const clip = index !== null ? currentAudioClips[index] : null;
     if (!clip) {
         player.removeAttribute('src');
         if (titleEl) titleEl.textContent = letter === 'A' ? 'Toque num card pra escolher' : 'Clique em outro card';
         if (playBtn) playBtn.disabled = true;
+        if (clearBtn) clearBtn.style.display = 'none';
         drawWaveform([], 0, canvasId);
         setComparePlayIcon(letter, false);
         return;
     }
     if (titleEl) titleEl.textContent = clip.title;
     if (playBtn) playBtn.disabled = false;
+    if (clearBtn) clearBtn.style.display = 'flex';
     player.src = clip.url;
     drawWaveform([], 0, canvasId);
     decodeAudioPeaks(clip).then(peaks => {
         const stillAssigned = (letter === 'A' ? compareSlotA : compareSlotB) === index;
         if (stillAssigned) drawWaveform(peaks, player.duration ? player.currentTime / player.duration : 0, canvasId);
     });
+}
+
+// Remove o áudio de um slot sem precisar re-achar o card na grade — usado
+// pelo botão "X" no cabeçalho do slot.
+function clearCompareSlot(letter) {
+    if (letter === 'A') compareSlotA = null; else compareSlotB = null;
+    renderAudioClipsGrid();
+    loadCompareSlot(letter);
 }
 
 function toggleComparePlay(letter) {
@@ -3902,7 +3913,14 @@ function setupAudioModuleControls() {
 
     document.getElementById('btn-audio-compare-toggle').addEventListener('click', (e) => {
         compareModeOn = !compareModeOn;
-        e.currentTarget.setAttribute('aria-pressed', String(compareModeOn));
+        const btn = e.currentTarget;
+        btn.setAttribute('aria-pressed', String(compareModeOn));
+        // Em modo comparar, o próprio botão vira o caminho de volta — texto e
+        // ícone mudam pra "voltar", senão a única pista de como sair é a cor
+        // de fundo, fácil de não perceber.
+        btn.innerHTML = compareModeOn
+            ? '<i class="fas fa-arrow-left" aria-hidden="true"></i> Voltar ao normal'
+            : '<i class="fas fa-columns" aria-hidden="true"></i> Comparar dois áudios';
         document.getElementById('audio-compare-panel').style.display = compareModeOn ? 'flex' : 'none';
         document.getElementById('audio-normal-view').style.display = compareModeOn ? 'none' : 'flex';
         if (compareModeOn) {
@@ -3917,6 +3935,8 @@ function setupAudioModuleControls() {
     });
     document.getElementById('btn-audio-compare-play-a').addEventListener('click', () => toggleComparePlay('A'));
     document.getElementById('btn-audio-compare-play-b').addEventListener('click', () => toggleComparePlay('B'));
+    document.getElementById('btn-audio-compare-clear-a').addEventListener('click', () => clearCompareSlot('A'));
+    document.getElementById('btn-audio-compare-clear-b').addEventListener('click', () => clearCompareSlot('B'));
 
     ['a', 'b'].forEach((letter) => {
         const compareCanvas = document.getElementById(`audio-compare-canvas-${letter}`);
