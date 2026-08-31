@@ -410,7 +410,9 @@ body {
 .audio-clips-grid {
     flex: 1 1 50%; min-width: 0; border-radius: var(--radius);
     scrollbar-width: thin; scrollbar-color: #bbb transparent; /* Firefox */
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); grid-auto-rows: 75px; gap: 8px;
 }
+.audio-clips-grid .audio-clip-card { font-size: 12px; padding: 6px; }
 .audio-clips-grid::-webkit-scrollbar { width: 8px; }
 .audio-clips-grid::-webkit-scrollbar-track { background: transparent; }
 .audio-clips-grid::-webkit-scrollbar-thumb { background-color: #ccc; border-radius: 4px; }
