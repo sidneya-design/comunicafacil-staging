@@ -203,39 +203,68 @@
                     <div class="audio-module-layout">
                         <div class="grid-container audio-clips-grid" id="grid-audio-clips"></div>
                         <div class="audio-player-panel" id="audio-player-panel">
-                            <canvas id="audio-waveform-canvas"></canvas>
-                            <div class="audio-progress-row">
-                                <span class="audio-time" id="audio-time-current">0:00</span>
-                                <div class="audio-progress-track" id="audio-progress-track">
-                                    <div class="audio-progress-fill" id="audio-progress-fill"></div>
-                                    <div class="audio-progress-thumb" id="audio-progress-thumb"></div>
+                            <div class="audio-player-topbar">
+                                <button type="button" id="btn-audio-compare-toggle" class="audio-compare-toggle-btn" aria-pressed="false">
+                                    <i class="fas fa-columns" aria-hidden="true"></i> Comparar dois áudios
+                                </button>
+                            </div>
+                            <div class="audio-compare-panel" id="audio-compare-panel" style="display:none;">
+                                <div class="audio-compare-slot">
+                                    <div class="audio-compare-slot-header">
+                                        <span class="audio-compare-slot-label">Referência</span>
+                                        <span class="audio-compare-slot-title" id="audio-compare-title-a">Toque num card pra escolher</span>
+                                    </div>
+                                    <canvas class="audio-compare-canvas" id="audio-compare-canvas-a"></canvas>
+                                    <button type="button" class="audio-control-btn audio-control-btn-play audio-compare-play-btn" id="btn-audio-compare-play-a" aria-label="Tocar referência">
+                                        <i class="fas fa-play" aria-hidden="true"></i>
+                                    </button>
                                 </div>
-                                <span class="audio-time" id="audio-time-duration">0:00</span>
+                                <div class="audio-compare-slot">
+                                    <div class="audio-compare-slot-header">
+                                        <span class="audio-compare-slot-label">Comparar com</span>
+                                        <span class="audio-compare-slot-title" id="audio-compare-title-b">Clique em outro card</span>
+                                    </div>
+                                    <canvas class="audio-compare-canvas" id="audio-compare-canvas-b"></canvas>
+                                    <button type="button" class="audio-control-btn audio-control-btn-play audio-compare-play-btn" id="btn-audio-compare-play-b" aria-label="Tocar comparação">
+                                        <i class="fas fa-play" aria-hidden="true"></i>
+                                    </button>
+                                </div>
                             </div>
-                            <div class="audio-record-row">
-                                <button type="button" id="btn-audio-record" class="audio-record-btn" aria-label="Gravar minha voz">
-                                    <i class="fas fa-microphone" aria-hidden="true"></i>
-                                    <span id="audio-record-btn-label">Gravar minha voz</span>
-                                </button>
-                                <span class="audio-record-timer" id="audio-record-timer"></span>
-                            </div>
-                            <div class="audio-controls-bar">
-                                <button type="button" id="btn-audio-shuffle" class="audio-control-btn" aria-label="Aleatório" aria-pressed="false">
-                                    <i class="fas fa-random" aria-hidden="true"></i>
-                                </button>
-                                <button type="button" id="btn-audio-prev" class="audio-control-btn" aria-label="Anterior">
-                                    <i class="fas fa-step-backward" aria-hidden="true"></i>
-                                </button>
-                                <button type="button" id="btn-audio-play" class="audio-control-btn audio-control-btn-play" aria-label="Reproduzir">
-                                    <i class="fas fa-play" aria-hidden="true"></i>
-                                </button>
-                                <button type="button" id="btn-audio-next" class="audio-control-btn" aria-label="Próximo">
-                                    <i class="fas fa-step-forward" aria-hidden="true"></i>
-                                </button>
-                                <button type="button" id="btn-audio-repeat" class="audio-control-btn" aria-label="Repetir" aria-pressed="false">
-                                    <i class="fas fa-redo" aria-hidden="true"></i>
-                                </button>
-                                <button type="button" id="btn-audio-speed" class="audio-control-btn audio-speed-btn" aria-label="Velocidade de reprodução">1x</button>
+                            <div class="audio-normal-view" id="audio-normal-view">
+                                <canvas id="audio-waveform-canvas"></canvas>
+                                <div class="audio-progress-row">
+                                    <span class="audio-time" id="audio-time-current">0:00</span>
+                                    <div class="audio-progress-track" id="audio-progress-track">
+                                        <div class="audio-progress-fill" id="audio-progress-fill"></div>
+                                        <div class="audio-progress-thumb" id="audio-progress-thumb"></div>
+                                    </div>
+                                    <span class="audio-time" id="audio-time-duration">0:00</span>
+                                </div>
+                                <div class="audio-record-row">
+                                    <button type="button" id="btn-audio-record" class="audio-record-btn" aria-label="Gravar minha voz">
+                                        <i class="fas fa-microphone" aria-hidden="true"></i>
+                                        <span id="audio-record-btn-label">Gravar minha voz</span>
+                                    </button>
+                                    <span class="audio-record-timer" id="audio-record-timer"></span>
+                                </div>
+                                <div class="audio-controls-bar">
+                                    <button type="button" id="btn-audio-shuffle" class="audio-control-btn" aria-label="Aleatório" aria-pressed="false">
+                                        <i class="fas fa-random" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" id="btn-audio-prev" class="audio-control-btn" aria-label="Anterior">
+                                        <i class="fas fa-step-backward" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" id="btn-audio-play" class="audio-control-btn audio-control-btn-play" aria-label="Reproduzir">
+                                        <i class="fas fa-play" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" id="btn-audio-next" class="audio-control-btn" aria-label="Próximo">
+                                        <i class="fas fa-step-forward" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" id="btn-audio-repeat" class="audio-control-btn" aria-label="Repetir" aria-pressed="false">
+                                        <i class="fas fa-redo" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" id="btn-audio-speed" class="audio-control-btn audio-speed-btn" aria-label="Velocidade de reprodução">1x</button>
+                                </div>
                             </div>
                         </div>
                     </div>

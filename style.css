@@ -423,6 +423,13 @@ body {
 }
 .audio-clip-card:active { transform: scale(0.95); }
 .audio-clip-card.active { box-shadow: 0 0 0 4px rgba(0,0,0,0.25) inset; }
+.audio-clip-card.compare-slot-a { box-shadow: 0 0 0 4px #2fb8af inset; }
+.audio-clip-card.compare-slot-b { box-shadow: 0 0 0 4px #ff7043 inset; }
+.audio-compare-slot-badge {
+    position: absolute; top: 6px; left: 6px; width: 20px; height: 20px; border-radius: 50%;
+    background: rgba(0,0,0,0.45); color: white; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: bold;
+}
 /* Categorias por cor — mesma paleta de Mídias, mas com texto escuro:
    as cores são pastéis, branco em cima delas fica com contraste ruim. */
 .audio-clip-card.audio-color-orange { background-color: var(--color-orange); color: #111; }
@@ -447,7 +454,28 @@ body {
     background: white; border-radius: var(--radius);
     display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
+.audio-player-topbar { display: flex; justify-content: flex-end; padding: 8px 10px 0; }
+.audio-compare-toggle-btn {
+    background: none; border: 1px solid #ddd; color: #666; border-radius: 999px;
+    padding: 5px 12px; font-size: 12px; font-weight: bold; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+}
+.audio-compare-toggle-btn:hover { background: #f5f5f5; }
+.audio-compare-toggle-btn[aria-pressed="true"] { background: var(--audio-accent); color: white; border-color: var(--audio-accent); }
+.audio-normal-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #audio-waveform-canvas { flex: 1; width: 100%; min-height: 0; cursor: pointer; touch-action: none; }
+
+.audio-compare-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px 16px 16px; }
+.audio-compare-slot {
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+    background: var(--panel-bg); border-radius: var(--radius); padding: 10px; gap: 8px;
+}
+.audio-compare-slot-header { display: flex; flex-direction: column; }
+.audio-compare-slot-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: #999; font-weight: bold; }
+.audio-compare-slot-title { font-size: 14px; font-weight: bold; color: #333; }
+.audio-compare-canvas { flex: 1; min-height: 0; width: 100%; cursor: pointer; touch-action: none; background: white; border-radius: 8px; }
+.audio-compare-play-btn { width: 36px; height: 36px; font-size: 15px; align-self: center; flex-shrink: 0; }
+.audio-compare-play-btn:disabled { opacity: 0.4; cursor: default; }
 
 .audio-progress-row {
     display: flex; align-items: center; gap: 10px; padding: 10px 16px 0; background: white;

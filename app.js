@@ -3314,6 +3314,101 @@ let audioRepeatOn = false;
 const audioPeaksCache = new Map(); // clip.id -> array de picos de amplitude já decodificados
 const audioPlayerEl = new Audio();
 
+// Modo comparar: dois clipes lado a lado (ex.: referência + gravação da
+// pessoa), cada um com seu próprio <audio> e onda — pra ouvir/comparar sem
+// precisar ficar trocando entre os cards. Reaproveita audioPeaksCache (já é
+// por clip.id, serve tanto pro player normal quanto pros slots).
+let compareModeOn = false;
+let compareSlotA = null;
+let compareSlotB = null;
+const audioPlayerElA = new Audio();
+const audioPlayerElB = new Audio();
+
+// Clique num card em modo comparar preenche o slot A primeiro, depois o B;
+// clicar num card que já ocupa um slot o remove; com os dois slots cheios,
+// um terceiro clique substitui o B (A fica fixo como referência).
+function assignCompareSlot(index) {
+    if (compareSlotA === index) {
+        compareSlotA = compareSlotB;
+        compareSlotB = null;
+    } else if (compareSlotB === index) {
+        compareSlotB = null;
+    } else if (compareSlotA === null) {
+        compareSlotA = index;
+    } else if (compareSlotB === null) {
+        compareSlotB = index;
+    } else {
+        compareSlotB = index;
+    }
+    renderAudioClipsGrid();
+    loadCompareSlot('A');
+    loadCompareSlot('B');
+}
+
+function loadCompareSlot(letter) {
+    const index = letter === 'A' ? compareSlotA : compareSlotB;
+    const player = letter === 'A' ? audioPlayerElA : audioPlayerElB;
+    const titleEl = document.getElementById(`audio-compare-title-${letter.toLowerCase()}`);
+    const canvasId = `audio-compare-canvas-${letter.toLowerCase()}`;
+    const playBtn = document.getElementById(`btn-audio-compare-play-${letter.toLowerCase()}`);
+    player.pause();
+    const clip = index !== null ? currentAudioClips[index] : null;
+    if (!clip) {
+        player.removeAttribute('src');
+        if (titleEl) titleEl.textContent = letter === 'A' ? 'Toque num card pra escolher' : 'Clique em outro card';
+        if (playBtn) playBtn.disabled = true;
+        drawWaveform([], 0, canvasId);
+        setComparePlayIcon(letter, false);
+        return;
+    }
+    if (titleEl) titleEl.textContent = clip.title;
+    if (playBtn) playBtn.disabled = false;
+    player.src = clip.url;
+    drawWaveform([], 0, canvasId);
+    decodeAudioPeaks(clip).then(peaks => {
+        const stillAssigned = (letter === 'A' ? compareSlotA : compareSlotB) === index;
+        if (stillAssigned) drawWaveform(peaks, player.duration ? player.currentTime / player.duration : 0, canvasId);
+    });
+}
+
+function toggleComparePlay(letter) {
+    const player = letter === 'A' ? audioPlayerElA : audioPlayerElB;
+    const otherPlayer = letter === 'A' ? audioPlayerElB : audioPlayerElA;
+    if (!player.src) return;
+    if (player.paused) {
+        otherPlayer.pause();
+        player.play();
+    } else {
+        player.pause();
+    }
+}
+
+function setComparePlayIcon(letter, isPlaying) {
+    const btn = document.getElementById(`btn-audio-compare-play-${letter.toLowerCase()}`);
+    if (!btn) return;
+    btn.innerHTML = isPlaying
+        ? '<i class="fas fa-pause" aria-hidden="true"></i>'
+        : '<i class="fas fa-play" aria-hidden="true"></i>';
+}
+
+function updateComparePlayerUI(letter) {
+    const index = letter === 'A' ? compareSlotA : compareSlotB;
+    const player = letter === 'A' ? audioPlayerElA : audioPlayerElB;
+    const clip = index !== null ? currentAudioClips[index] : null;
+    if (!clip) return;
+    const peaks = audioPeaksCache.get(clip.id);
+    const fraction = player.duration ? player.currentTime / player.duration : 0;
+    if (peaks) drawWaveform(peaks, fraction, `audio-compare-canvas-${letter.toLowerCase()}`);
+}
+
+function seekComparePlayerToFraction(letter, fraction) {
+    const player = letter === 'A' ? audioPlayerElA : audioPlayerElB;
+    if (!player.duration) return;
+    fraction = Math.min(1, Math.max(0, fraction));
+    player.currentTime = fraction * player.duration;
+    updateComparePlayerUI(letter);
+}
+
 // Gravação da própria voz (prática: ouvir o clipe de referência, depois se
 // gravar tentando repetir) — vira um card próprio na grade, salvo só local
 // (IndexedDB, nunca Supabase), pra comparar com o áudio de referência.
@@ -3422,7 +3517,11 @@ async function deleteAudioClip(clip) {
         drawWaveform([], 0);
         updateAudioProgressUI(0);
     }
+    if (currentAudioClips[compareSlotA]?.id === clip.id) compareSlotA = null;
+    if (currentAudioClips[compareSlotB]?.id === clip.id) compareSlotB = null;
     await loadAudioClips();
+    loadCompareSlot('A');
+    loadCompareSlot('B');
 }
 
 function renderAudioClipsGrid() {
@@ -3439,15 +3538,25 @@ function renderAudioClipsGrid() {
         card.type = 'button';
         card.className = 'audio-clip-card'
             + (clip.isRecording ? ' audio-recording-card' : (clip.colorClass ? ` audio-color-${clip.colorClass}` : ''))
-            + (index === currentAudioClipIndex ? ' active' : '');
+            + (index === currentAudioClipIndex ? ' active' : '')
+            + (compareModeOn && index === compareSlotA ? ' compare-slot-a' : '')
+            + (compareModeOn && index === compareSlotB ? ' compare-slot-b' : '');
         card.textContent = clip.title;
-        card.addEventListener('click', () => selectAudioClip(index, true));
+        card.addEventListener('click', () => {
+            if (compareModeOn) assignCompareSlot(index); else selectAudioClip(index, true);
+        });
 
         if (clip.isRecording) {
             const badge = document.createElement('span');
             badge.className = 'audio-recording-badge';
             badge.innerHTML = '<i class="fas fa-microphone" aria-hidden="true"></i>';
             card.appendChild(badge);
+        }
+        if (compareModeOn && (index === compareSlotA || index === compareSlotB)) {
+            const slotBadge = document.createElement('span');
+            slotBadge.className = 'audio-compare-slot-badge';
+            slotBadge.textContent = index === compareSlotA ? 'A' : 'B';
+            card.appendChild(slotBadge);
         }
 
         // Admin edita/apaga qualquer clipe; médico só o próprio banco (dele
@@ -3601,8 +3710,8 @@ async function decodeAudioPeaks(clip) {
     }
 }
 
-function drawWaveform(peaks, progressFraction) {
-    const canvas = document.getElementById('audio-waveform-canvas');
+function drawWaveform(peaks, progressFraction, canvasId = 'audio-waveform-canvas') {
+    const canvas = document.getElementById(canvasId);
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     const width = canvas.clientWidth || 1;
@@ -3791,6 +3900,47 @@ function setupAudioModuleControls() {
 
     document.getElementById('btn-audio-record').addEventListener('click', toggleAudioRecording);
 
+    document.getElementById('btn-audio-compare-toggle').addEventListener('click', (e) => {
+        compareModeOn = !compareModeOn;
+        e.currentTarget.setAttribute('aria-pressed', String(compareModeOn));
+        document.getElementById('audio-compare-panel').style.display = compareModeOn ? 'flex' : 'none';
+        document.getElementById('audio-normal-view').style.display = compareModeOn ? 'none' : 'flex';
+        if (compareModeOn) {
+            audioPlayerEl.pause();
+            loadCompareSlot('A');
+            loadCompareSlot('B');
+        } else {
+            audioPlayerElA.pause();
+            audioPlayerElB.pause();
+        }
+        renderAudioClipsGrid();
+    });
+    document.getElementById('btn-audio-compare-play-a').addEventListener('click', () => toggleComparePlay('A'));
+    document.getElementById('btn-audio-compare-play-b').addEventListener('click', () => toggleComparePlay('B'));
+
+    ['a', 'b'].forEach((letter) => {
+        const compareCanvas = document.getElementById(`audio-compare-canvas-${letter}`);
+        let compareDragging = false;
+        const seekCompare = (e) => {
+            const rect = compareCanvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            seekComparePlayerToFraction(letter.toUpperCase(), (clientX - rect.left) / rect.width);
+        };
+        compareCanvas.addEventListener('mousedown', (e) => { compareDragging = true; seekCompare(e); });
+        compareCanvas.addEventListener('touchstart', (e) => { compareDragging = true; seekCompare(e); });
+        window.addEventListener('mousemove', (e) => { if (compareDragging) seekCompare(e); });
+        window.addEventListener('touchmove', (e) => { if (compareDragging) seekCompare(e); });
+        window.addEventListener('mouseup', () => { compareDragging = false; });
+        window.addEventListener('touchend', () => { compareDragging = false; });
+    });
+
+    audioPlayerElA.addEventListener('timeupdate', () => updateComparePlayerUI('A'));
+    audioPlayerElB.addEventListener('timeupdate', () => updateComparePlayerUI('B'));
+    audioPlayerElA.addEventListener('play', () => setComparePlayIcon('A', true));
+    audioPlayerElA.addEventListener('pause', () => setComparePlayIcon('A', false));
+    audioPlayerElB.addEventListener('play', () => setComparePlayIcon('B', true));
+    audioPlayerElB.addEventListener('pause', () => setComparePlayIcon('B', false));
+
     // Velocidade fica no próprio elemento <audio> (não reseta ao trocar de
     // clipe, já que é o mesmo elemento reaproveitado entre seleções).
     const audioSpeedSteps = [1, 0.75, 0.5, 1.25];
@@ -3845,6 +3995,8 @@ function setupAudioModuleControls() {
 
     window.addEventListener('resize', () => {
         updateAudioProgressUI(audioPlayerEl.duration ? audioPlayerEl.currentTime / audioPlayerEl.duration : 0);
+        updateComparePlayerUI('A');
+        updateComparePlayerUI('B');
     });
 }
 
