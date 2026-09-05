@@ -544,16 +544,34 @@ body {
 .audio-speed-btn { width: auto; min-width: 40px; padding: 0 10px; border-radius: 999px; font-size: 13px; font-weight: bold; }
 .audio-speed-btn.active { color: var(--audio-accent); opacity: 1; }
 
-/* Celular: lado a lado não cabe — empilha grade em cima, player embaixo,
-   cada um com sua própria altura fixa (em vez de dividir 480px ao meio). */
+/* Celular: lado a lado não cabe — empilha grade em cima, player embaixo.
+   Grade ocupa o espaço restante e rola por conta própria; player fica com
+   altura fixa e sempre visível (nunca some rolando junto com a grade). */
 @media (max-width: 768px) {
-    .audio-module-layout { flex-direction: column; height: auto; max-height: none; overflow-y: auto; }
-    .audio-clips-grid { flex: none; width: 100%; height: 280px; }
-    .audio-player-panel { flex: none; width: 100%; max-width: 100%; min-width: 0; height: 320px; }
+    /* overflow:hidden (não mais auto) — quem rola agora é só a grade de
+       cards (flex:1, sua própria barra já vinha de .grid-container); o
+       player fica com altura fixa e nunca sai da tela por rolagem. */
+    .audio-module-layout { flex-direction: column; max-height: none; overflow: hidden; }
+    /* Seletor .audio-module-layout .audio-clips-grid (especificidade maior que
+       .grid-container sozinho) pra não ser sobrescrito pela regra genérica
+       .grid-container do breakpoint mobile mais abaixo no arquivo — mesma
+       especificidade + ordem de origem fariam ela vencer e voltar a grade pro
+       layout de 3 colunas/120px, cortando os cards pequenos de áudio. */
+    .audio-module-layout .audio-clips-grid {
+        flex: 1 1 auto; min-height: 0; width: 100%; height: auto;
+        grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); grid-auto-rows: 75px; gap: 8px; padding: 10px;
+    }
+    .audio-player-panel { flex: 0 0 auto; width: 100%; max-width: 100%; min-width: 0; height: 320px; }
     .audio-controls-bar { gap: 8px; padding: 12px; }
     .audio-control-btn { width: 36px; height: 36px; font-size: 16px; }
     .audio-control-btn-play { width: 48px; height: 48px; font-size: 18px; }
     .audio-speed-btn { width: auto; min-width: 36px; height: 36px; padding: 0 8px; font-size: 12px; }
+    /* "Adicionar Áudio" é fluxo de upload de arquivo — no celular a prática é
+       gravar a própria voz (botão de microfone no player), então o cabeçalho
+       inteiro (botão + dica) só ocupa espaço à toa nessa tela. !important
+       necessário: showEditBars() seta display inline ('flex') pra
+       médico/admin, que sempre vence uma regra normal de CSS. */
+    #audio-upload-header { display: none !important; }
 }
 
 /* PAINEL ADMIN (gestão de usuários) */
@@ -1483,6 +1501,43 @@ button, .action-btn { touch-action: manipulation; }
     .complete-sentence-game-title small { display: none; }
     .complete-sentence-game-header { gap: 8px; }
     #btn-manage-complete-sentence { margin-left: auto; padding: 7px 10px; }
+}
+
+/* Jogo: Números — teclado numérico com leitura por voz */
+.numbers-game-play {
+    display: flex; flex-direction: column; align-items: center; gap: 24px;
+    padding: 10px 16px 24px; max-width: 420px; margin: 0 auto; width: 100%;
+}
+.numbers-display {
+    width: 100%; min-height: 96px; background: white; border: 3px solid var(--color-blue);
+    border-radius: 18px; display: flex; align-items: center; justify-content: center;
+    font-size: 56px; font-weight: 800; color: #0b3d5c; letter-spacing: 2px;
+    box-shadow: 0 6px 18px rgba(79, 195, 247, 0.25);
+}
+.numbers-display-empty { color: #b0bec5; }
+.numbers-display-pulse { animation: numbers-pop 0.22s ease-out; }
+@keyframes numbers-pop {
+    0% { transform: scale(1.08); }
+    100% { transform: scale(1); }
+}
+.numbers-keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; width: 100%; }
+.numbers-key {
+    border: 2px solid var(--color-blue); background: white; color: #0b3d5c;
+    border-radius: 16px; font-size: 30px; font-weight: 700; min-height: 68px;
+    cursor: pointer; transition: transform 0.1s ease, background 0.15s ease;
+}
+.numbers-key:hover { background: #e1f5fe; }
+.numbers-key:active { transform: scale(0.94); }
+.numbers-key-backspace, .numbers-key-enter { font-size: 20px; border: none; color: white; }
+.numbers-key-backspace { background: #9E9E9E; }
+.numbers-key-backspace:hover { background: #8a8a8a; }
+.numbers-key-enter { background: #4CAF50; }
+.numbers-key-enter:hover { background: #43a047; }
+.numbers-key-enter:disabled { background: #c8e6c9; cursor: not-allowed; }
+
+@media (max-width: 480px) {
+    .numbers-display { font-size: 42px; min-height: 76px; }
+    .numbers-key { font-size: 24px; min-height: 58px; }
 }
 
 /* Jornada das Forças */

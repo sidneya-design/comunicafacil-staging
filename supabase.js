@@ -55,9 +55,29 @@ const resilientAuthStorage = {
 // (não embutida) deve renovar; a embutida só lê a sessão que o pai já mantém em dia.
 const isEmbeddedContext = window.self !== window.top || new URLSearchParams(window.location.search).get('embedded') === '1';
 
+// "Sair de verdade" ao fechar a aba/navegador — sem isso, o token de sessão
+// persistia no localStorage indefinidamente e reabrir o app entrava direto
+// como o último usuário logado (problema num Chromebook compartilhado entre
+// pacientes na clínica, e uma sessão velha/corrompida podia ficar presa por
+// muito tempo sem ninguém perceber). sessionStorage some quando a aba/janela
+// fecha de verdade, mas sobrevive a um F5 normal — é o sinal que usamos pra
+// distinguir "acabei de reabrir o app" de "só recarreguei a página".
+const TAB_ALIVE_KEY = 'comunica_tab_alive_v1';
+const isFreshBrowserLaunch = !isEmbeddedContext && !sessionStorage.getItem(TAB_ALIVE_KEY);
+if (!isEmbeddedContext) {
+    sessionStorage.setItem(TAB_ALIVE_KEY, '1');
+}
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: { storage: resilientAuthStorage, autoRefreshToken: !isEmbeddedContext }
 });
+
+if (isFreshBrowserLaunch) {
+    // scope: 'local' só limpa a sessão salva neste navegador, sem depender
+    // de uma chamada de rede pro Supabase revogar o token no servidor — não
+    // pode travar esperando resposta numa clínica com internet ruim.
+    supabase.auth.signOut({ scope: 'local' }).catch(() => { /* sem sessão pra limpar, tudo bem */ });
+}
 
 // Optionally expose for debugging
 window.supabase = supabase;

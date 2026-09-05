@@ -65,6 +65,10 @@
                 <i class="fas fa-gamepad" aria-hidden="true"></i>
                 <span>Jogos</span>
             </button>
+            <button class="nav-btn nav-btn-gated" data-view="view-numeric-keyboard" aria-pressed="false">
+                <i class="fas fa-sort-numeric-up" aria-hidden="true"></i>
+                <span>Teclado Numérico</span>
+            </button>
             <button class="nav-btn nav-btn-gated" data-view="view-ia" aria-pressed="false">
                 <i class="fas fa-robot" aria-hidden="true"></i>
                 <span>IA</span>
@@ -199,6 +203,10 @@
                             <i class="fas fa-search" aria-hidden="true"></i>
                             <input type="text" id="audio-filter-search" placeholder="Buscar por nome...">
                         </div>
+                    </div>
+                    <div id="patient-context-banner-audio" style="display:none; background:#fff3cd; color:#664d03; padding:10px 16px; border-radius:8px; margin-bottom:10px; align-items:center; justify-content:space-between; gap:10px;">
+                        <span id="patient-context-banner-audio-text"></span>
+                        <button type="button" id="btn-clear-patient-context-audio" class="btn-secondary" style="padding:4px 10px;">Sair do modo paciente</button>
                     </div>
                     <div class="audio-module-layout">
                         <div class="grid-container audio-clips-grid" id="grid-audio-clips"></div>
@@ -777,6 +785,37 @@
                     </div>
                 </main>
 
+                <!-- Tela: Teclado Numérico -->
+                <main class="view-section" id="view-numeric-keyboard">
+                    <div class="memory-header">
+                        <div class="complete-sentence-game-title">
+                            <span class="complete-sentence-game-icon" style="color:#0284c7; background:#e0f2fe;"><i class="fas fa-sort-numeric-up" aria-hidden="true"></i></span>
+                            <div>
+                                <strong>Teclado Numérico</strong>
+                                <small>Digite um número no teclado e ouça como ele soa.</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="numbers-game-play">
+                        <div class="numbers-display numbers-display-empty" id="numbers-display-value">—</div>
+                        <div class="numbers-keypad" id="numbers-keypad">
+                            <button type="button" class="numbers-key" data-digit="1">1</button>
+                            <button type="button" class="numbers-key" data-digit="2">2</button>
+                            <button type="button" class="numbers-key" data-digit="3">3</button>
+                            <button type="button" class="numbers-key" data-digit="4">4</button>
+                            <button type="button" class="numbers-key" data-digit="5">5</button>
+                            <button type="button" class="numbers-key" data-digit="6">6</button>
+                            <button type="button" class="numbers-key" data-digit="7">7</button>
+                            <button type="button" class="numbers-key" data-digit="8">8</button>
+                            <button type="button" class="numbers-key" data-digit="9">9</button>
+                            <button type="button" class="numbers-key numbers-key-backspace" id="btn-numbers-backspace" aria-label="Apagar último dígito"><i class="fas fa-delete-left" aria-hidden="true"></i></button>
+                            <button type="button" class="numbers-key" data-digit="0">0</button>
+                            <button type="button" class="numbers-key numbers-key-enter" id="btn-numbers-enter" disabled aria-label="Falar número"><i class="fas fa-check" aria-hidden="true"></i></button>
+                        </div>
+                    </div>
+                </main>
+
                 <!-- Tela: IA (Chat Nativo com Azure AI) -->
                 <main class="view-section" id="view-ia" style="background: var(--bg-1); border-radius: var(--radius); overflow: hidden;">
                     <div style="background: white; color: black; padding: 15px 20px; font-weight: 600; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #ddd;">
@@ -1216,6 +1255,18 @@
                         </div>
                         <p class="media-hint" id="patient-medias-subtitle" style="margin-bottom: 1rem;"></p>
                         <div id="patient-medias-list" style="display:flex; flex-direction:column; gap:10px;"></div>
+                    </div>
+                </div>
+
+                <!-- Modal: Áudios do banco do médico liberados por Paciente -->
+                <div class="modal-overlay" id="patient-audio-modal" role="dialog" aria-modal="true" aria-labelledby="patient-audio-modal-title">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h2 id="patient-audio-modal-title">Áudios liberados</h2>
+                            <button class="close-modal-btn" id="btn-close-patient-audio" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
+                        </div>
+                        <p class="media-hint" id="patient-audio-subtitle" style="margin-bottom: 1rem;"></p>
+                        <div id="patient-audio-list" style="display:flex; flex-direction:column; gap:10px;"></div>
                     </div>
                 </div>
 
@@ -2112,7 +2163,7 @@
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=78"></script>
+    <script defer src="app.js?v=79"></script>
 </body>
 
 

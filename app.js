@@ -341,6 +341,7 @@ const USAGE_VIEW_LABELS = {
     'view-audio': 'Áudios',
     'view-exercises': 'Exercícios',
     'view-games': 'Jogos',
+    'view-numeric-keyboard': 'Teclado Numérico',
     'view-ia': 'IA',
     'view-admin': 'Admin',
     'view-doctor-patients': 'Meus Pacientes'
@@ -770,6 +771,7 @@ function getSectionLabel(sectionId) {
         'view-audio': 'Tela: Áudios',
         'view-exercises': 'Tela: Exercícios',
         'view-games': 'Tela: Jogos',
+        'view-numeric-keyboard': 'Tela: Teclado Numérico',
         'view-ia': 'Tela: Assistente IA',
         'view-admin': 'Tela: Admin',
         'view-doctor-patients': 'Tela: Meus Pacientes',
@@ -1662,12 +1664,21 @@ function setupNavigation() {
                 );
             }
 
+            // Saiu da aba Áudios com algo tocando (player normal ou os dois
+            // slots do modo comparar) — sem isso o clipe seguia tocando por
+            // baixo da tela nova, sem controle nenhum visível pra pausar.
+            if (targetView !== 'view-audio') {
+                audioPlayerEl.pause();
+                audioPlayerElA.pause();
+                audioPlayerElB.pause();
+            }
+
             // Pré-carrega áudios de todos os cards da aba que acabou de abrir
             prefetchViewAudio(targetView);
             
             // Oculta a barra de mensagens nas telas que não usam composição de frases.
             if (messageBar) {
-                if (targetView === 'view-topics' || targetView === 'view-virtues' || targetView === 'view-media' || targetView === 'view-audio' || targetView === 'view-ia' || targetView === 'view-exercises' || targetView === 'view-games' || targetView === 'view-admin' || targetView === 'view-books' || targetView === 'view-doctor-patients') {
+                if (targetView === 'view-topics' || targetView === 'view-virtues' || targetView === 'view-media' || targetView === 'view-audio' || targetView === 'view-ia' || targetView === 'view-exercises' || targetView === 'view-games' || targetView === 'view-numeric-keyboard' || targetView === 'view-admin' || targetView === 'view-books' || targetView === 'view-doctor-patients') {
                     messageBar.style.display = 'none';
                 } else {
                     messageBar.style.display = 'flex';
@@ -1688,6 +1699,10 @@ function setupNavigation() {
 
             if (targetView === 'view-audio') {
                 loadAudioClips();
+            }
+
+            if (targetView === 'view-numeric-keyboard') {
+                initNumericKeyboard();
             }
         });
     });
@@ -3429,7 +3444,20 @@ let isAudioRecording = false;
 let audioRecordStartedAt = 0;
 let audioRecordTimerInterval = null;
 
+let patientAudioReleaseMap = new Map(); // audio_id (string) -> visible, só preenchido quando activePatientContext
+
 async function loadAudioClips() {
+    // Mesmo mapa que loadMediaCards/loadExerciseCards montam pra suas flags:
+    // sem isso, o selo "Liberado"/"Não liberado" no card não teria como saber
+    // o estado de patient_audio_flags pros clipes do banco (sem patientId direto).
+    if (supabaseClient && isDoctor && activePatientContext) {
+        const { data: flags } = await supabaseClient
+            .from('patient_audio_flags').select('audio_id, visible').eq('patient_id', activePatientContext.id);
+        patientAudioReleaseMap = new Map((flags || []).map(f => [String(f.audio_id), f.visible]));
+    } else {
+        patientAudioReleaseMap = new Map();
+    }
+
     let supabaseClips = [];
     if (supabaseClient) {
         try {
@@ -3439,8 +3467,17 @@ async function loadAudioClips() {
                     id: `sb:${c.id}`, rawId: c.id, fromSupabase: true,
                     title: c.title, url: c.audio_url, visible: c.visible !== false,
                     doctorUserId: c.doctor_user_id || null, companyId: c.company_id || null,
-                    colorClass: c.color_class || null
+                    patientId: c.patient_id || null, colorClass: c.color_class || null
                 }));
+                // Médico "dentro" de um paciente (mesmo cuidado de
+                // renderMediaCards/renderExerciseCards): vê só os clipes
+                // daquele paciente, mais os do banco (patientId nulo) como
+                // referência. Fora desse modo, a lista fica como a RLS
+                // devolveu (o próprio paciente já só recebe o que pode ver).
+                const inDoctorPatientContext = isDoctor && activePatientContext;
+                if (inDoctorPatientContext) {
+                    supabaseClips = supabaseClips.filter(c => !c.patientId || c.patientId === activePatientContext.id);
+                }
             }
         } catch (e) {}
     }
@@ -3466,13 +3503,21 @@ async function loadAudioClips() {
     });
 }
 
-async function saveAudioClip(title, file, colorClass) {
+async function saveAudioClip(title, file, colorClass, patientId = null) {
     if (supabaseClient) {
         try {
             const url = await uploadToSupabaseStorage('media_uploads', 'audio-clips', file);
+            // Igual a saveMediaToDB: gravado direto "dentro" de um paciente
+            // (patientId), o clipe já nasce visível só pra ele, sem passar
+            // pelo banco compartilhado/liberação por flag. Fora desse
+            // contexto, vai pro banco do médico (liberado depois por
+            // paciente em "Meus Pacientes" → Áudios).
+            const extraFields = patientId
+                ? { patient_id: patientId }
+                : { doctor_user_id: currentUserId, company_id: currentUserCompanyId };
             const { error } = await supabaseClient.from('audio_clips').insert([{
                 title, audio_url: url, visible: true, color_class: colorClass || null,
-                doctor_user_id: currentUserId, company_id: currentUserCompanyId
+                ...extraFields
             }]);
             if (error) throw error;
             await loadAudioClips();
@@ -3556,6 +3601,19 @@ function renderAudioClipsGrid() {
         card.addEventListener('click', () => {
             if (compareModeOn) assignCompareSlot(index); else selectAudioClip(index, true);
         });
+
+        if (isDoctor && activePatientContext && clip.fromSupabase) {
+            // Clipe escopado direto a esse paciente (clip.patientId) já nasce
+            // liberado — os demais (banco geral/global) só ficam liberados
+            // depois de marcados em patient_audio_flags (toggle em "Meus
+            // Pacientes" → Áudios liberados). Mesmo selo de renderMediaCards.
+            const isReleased = clip.patientId === activePatientContext.id
+                || patientAudioReleaseMap.get(String(clip.rawId)) === true;
+            const releaseBadge = document.createElement('div');
+            releaseBadge.className = 'release-status-badge ' + (isReleased ? 'is-released' : 'is-not-released');
+            releaseBadge.textContent = isReleased ? 'Liberado' : 'Não liberado';
+            card.appendChild(releaseBadge);
+        }
 
         if (clip.isRecording) {
             const badge = document.createElement('span');
@@ -4005,11 +4063,12 @@ function setupAudioModuleControls() {
     audioPlayerEl.addEventListener('play', () => setAudioPlayButtonIcon(true));
     audioPlayerEl.addEventListener('pause', () => setAudioPlayButtonIcon(false));
     audioPlayerEl.addEventListener('ended', () => {
-        if (audioRepeatOn && audioClipOrder.length === 1) {
+        // Ao terminar, só repete o clipe atual se "repetir" estiver ligado —
+        // nunca avança pro próximo card sozinho; isso só acontece por clique
+        // explícito (card da grade ou botões prev/next).
+        if (audioRepeatOn) {
             audioPlayerEl.currentTime = 0;
             audioPlayerEl.play();
-        } else {
-            goToAdjacentAudioClip(1, true);
         }
     });
 
@@ -4615,6 +4674,30 @@ function setupModals() {
         }
     });
 
+    document.getElementById('numbers-keypad')?.addEventListener('click', (e) => {
+        const digitBtn = e.target.closest('.numbers-key[data-digit]');
+        if (digitBtn) numbersPressDigit(digitBtn.dataset.digit);
+    });
+    document.getElementById('btn-numbers-backspace')?.addEventListener('click', numbersBackspace);
+    document.getElementById('btn-numbers-enter')?.addEventListener('click', numbersEnter);
+
+    // Teclado físico (0-9, Backspace, Enter) além do teclado na tela — vale tanto
+    // pro teclado de um computador quanto pro de um celular/tablet com teclado
+    // bluetooth conectado, já que os dois disparam o mesmo evento 'keydown'.
+    document.addEventListener('keydown', (e) => {
+        if (!document.getElementById('view-numeric-keyboard')?.classList.contains('active')) return;
+        if (e.key >= '0' && e.key <= '9') {
+            e.preventDefault();
+            numbersPressDigit(e.key);
+        } else if (e.key === 'Backspace') {
+            e.preventDefault();
+            numbersBackspace();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            numbersEnter();
+        }
+    });
+
     document.getElementById('btn-close-naming-set').addEventListener('click', closeNamingSetModal);
     document.getElementById('btn-cancel-naming-set').addEventListener('click', closeNamingSetModal);
     document.getElementById('naming-set-form').addEventListener('submit', async (e) => {
@@ -4773,7 +4856,8 @@ function setupModals() {
             if (currentEditingAudioClip) {
                 await updateAudioClip(currentEditingAudioClip, title, file, colorClass);
             } else {
-                await saveAudioClip(title, file, colorClass);
+                const targetPatientId = (isDoctor && activePatientContext) ? activePatientContext.id : null;
+                await saveAudioClip(title, file, colorClass, targetPatientId);
             }
             closeAudioUpload();
         } finally {
@@ -5587,6 +5671,7 @@ const ALL_MODULES = [
     { id: 'view-books', name: 'Livros', icon: 'fa-book' },
     { id: 'view-exercises', name: 'Exercícios', icon: 'fa-dumbbell' },
     { id: 'view-games', name: 'Jogos', icon: 'fa-gamepad' },
+    { id: 'view-numeric-keyboard', name: 'Teclado Numérico', icon: 'fa-sort-numeric-up' },
     { id: 'view-ia', name: 'Assistente IA', icon: 'fa-robot' }
 ];
 
@@ -6017,6 +6102,62 @@ function closeGame() {
     }
     
     restoreGamesBackButton();
+}
+
+// =============================================
+// TECLADO NUMÉRICO (view-numeric-keyboard) — teclado numérico que fala
+// o número digitado ao confirmar (botão verde), usando o mesmo speak()/voz
+// do resto do app. Aba própria (segue ALL_MODULES/liberação por módulo),
+// não um jogo dentro de view-games — por isso não usa openGame/closeGame.
+// =============================================
+const NUMBERS_MAX_DIGITS = 6; // acima disso o visor estoura e o TTS demora demais pra ler
+let numbersCurrentValue = '';
+
+function initNumericKeyboard() {
+    numbersCurrentValue = '';
+    renderNumbersDisplay();
+}
+
+function renderNumbersDisplay() {
+    const displayEl = document.getElementById('numbers-display-value');
+    if (!displayEl) return;
+    displayEl.textContent = numbersCurrentValue || '—';
+    displayEl.classList.toggle('numbers-display-empty', !numbersCurrentValue);
+
+    const enterBtn = document.getElementById('btn-numbers-enter');
+    if (enterBtn) enterBtn.disabled = !numbersCurrentValue;
+}
+
+function pulseNumbersDisplay() {
+    const displayEl = document.getElementById('numbers-display-value');
+    if (!displayEl) return;
+    displayEl.classList.remove('numbers-display-pulse');
+    void displayEl.offsetWidth; // força reflow pra reiniciar a animação em toques seguidos
+    displayEl.classList.add('numbers-display-pulse');
+}
+
+function numbersPressDigit(digit) {
+    if (numbersCurrentValue.length >= NUMBERS_MAX_DIGITS) return;
+    numbersCurrentValue += digit;
+    renderNumbersDisplay();
+    pulseNumbersDisplay();
+    // Começa a gerar o áudio já a cada dígito (em vez de só ao confirmar) —
+    // diferente do resto do app, o número não existe antes do usuário digitar,
+    // então não dá pra pré-carregar com antecedência; isso pelo menos usa o
+    // tempo de digitação pra já ter o áudio pronto (ou quase) quando confirmar.
+    prefetchTts(numbersCurrentValue);
+}
+
+function numbersBackspace() {
+    if (!numbersCurrentValue) return;
+    numbersCurrentValue = numbersCurrentValue.slice(0, -1);
+    renderNumbersDisplay();
+}
+
+function numbersEnter() {
+    if (!numbersCurrentValue) return;
+    pulseNumbersDisplay();
+    speak(numbersCurrentValue);
 }
 
 // =============================================
@@ -12507,7 +12648,22 @@ async function loadDoctorPatients() {
             btnViewMedias.className = 'admin-edit-password-btn';
             btnViewMedias.addEventListener('click', () => enterPatientContext(p, 'view-media'));
 
-            tdActions.append(btnPassword, btnModules, btnExercises, btnViewExercises, btnTopics, btnVirtues, btnCarometro, btnCarometroGlobal, btnBooks, btnReleaseBooks, btnMedias, btnViewMedias, btnToggleActive);
+            // Mesmo padrão de Mídias: banco do médico + liberação por paciente
+            // (patient_audio_flags), e "entrar no paciente" pra gravar/subir
+            // um áudio exclusivo dele.
+            const btnAudios = document.createElement('button');
+            btnAudios.innerHTML = '<i class="fas fa-headphones" aria-hidden="true"></i>';
+            btnAudios.title = 'Áudios liberados para este paciente';
+            btnAudios.className = 'admin-edit-password-btn';
+            btnAudios.addEventListener('click', () => openPatientAudioModal(p));
+
+            const btnViewAudios = document.createElement('button');
+            btnViewAudios.innerHTML = '<i class="fas fa-eye" aria-hidden="true"></i>';
+            btnViewAudios.title = 'Ver áudios deste paciente';
+            btnViewAudios.className = 'admin-edit-password-btn';
+            btnViewAudios.addEventListener('click', () => enterPatientContext(p, 'view-audio'));
+
+            tdActions.append(btnPassword, btnModules, btnExercises, btnViewExercises, btnTopics, btnVirtues, btnCarometro, btnCarometroGlobal, btnBooks, btnReleaseBooks, btnMedias, btnViewMedias, btnAudios, btnViewAudios, btnToggleActive);
             tr.append(tdName, tdEmail, tdStatus, tdCreated, tdLastSignIn, tdActions);
             tbody.appendChild(tr);
         });
@@ -12878,6 +13034,75 @@ document.getElementById('btn-close-patient-medias')?.addEventListener('click', (
     if (patientMediasModal) patientMediasModal.style.display = 'none';
 });
 
+// Áudios liberados por paciente — cópia quase literal de openPatientMediasModal,
+// trocando medias/patient_media_flags por audio_clips/patient_audio_flags.
+const patientAudioModal = document.getElementById('patient-audio-modal');
+
+async function openPatientAudioModal(patient) {
+    document.getElementById('patient-audio-subtitle').textContent = patient.name || patient.email;
+    const list = document.getElementById('patient-audio-list');
+    list.innerHTML = 'Carregando...';
+    if (patientAudioModal) patientAudioModal.style.display = 'flex';
+
+    // Banco do médico (doctor_user_id próprio ou da empresa) — clipes já
+    // escopados direto a um paciente (patient_id preenchido) não entram
+    // aqui, não fazem sentido "liberar" pra outro paciente.
+    const { data: myClips } = await supabaseClient
+        .from('audio_clips').select('id, title, doctor_user_id')
+        .or(doctorBankOrFilter())
+        .is('patient_id', null)
+        .order('title');
+    const { data: overrides } = await supabaseClient
+        .from('patient_audio_flags').select('audio_id, visible').eq('patient_id', patient.id);
+    const overrideMap = new Map((overrides || []).map(r => [r.audio_id, r.visible]));
+
+    list.innerHTML = '';
+    if (!myClips || !myClips.length) {
+        list.innerHTML = '<p class="media-hint">Nenhum áudio disponível pra liberar ainda. Adicione em "Áudios" na barra lateral.</p>';
+        return;
+    }
+
+    myClips.forEach(clip => {
+        const isGlobal = !clip.doctor_user_id;
+        const displayTitle = clip.title + (isGlobal ? ' (do admin)' : '');
+        const isVisible = overrideMap.has(clip.id) ? overrideMap.get(clip.id) : false;
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#f5f5f5; border-radius:8px;';
+
+        const label = document.createElement('span');
+        label.textContent = displayTitle;
+
+        const toggleWrap = document.createElement('div');
+        toggleWrap.style.cssText = 'position:relative; width:32px; height:18px;';
+
+        const toggleBtn = document.createElement('button');
+        toggleBtn.className = 'visibility-toggle-btn ' + (isVisible ? 'is-visible' : 'is-hidden');
+        toggleBtn.style.cssText = 'position:absolute; top:0; left:0;';
+        toggleBtn.setAttribute('role', 'switch');
+        toggleBtn.setAttribute('aria-checked', String(isVisible));
+        toggleBtn.setAttribute('aria-label', `Liberar ${displayTitle} para ${patient.name || patient.email}`);
+        toggleBtn.addEventListener('click', async () => {
+            const newVisible = !isVisible;
+            try {
+                await supabaseClient.from('patient_audio_flags')
+                    .upsert({ patient_id: patient.id, audio_id: clip.id, visible: newVisible, updated_at: new Date().toISOString() });
+                openPatientAudioModal(patient);
+            } catch (err) {
+                showDoctorPatientsFeedback('Erro ao liberar áudio: ' + err.message, true);
+            }
+        });
+
+        toggleWrap.appendChild(toggleBtn);
+        row.append(label, toggleWrap);
+        list.appendChild(row);
+    });
+}
+
+document.getElementById('btn-close-patient-audio')?.addEventListener('click', () => {
+    if (patientAudioModal) patientAudioModal.style.display = 'none';
+});
+
 // Livros liberados por paciente — diferente dos outros 3 (mídias/tópicos/
 // virtudes, que mostram o banco inteiro com toggle ligado/desligado): aqui
 // a lista principal só mostra o que JÁ está liberado (com botão de
@@ -13103,6 +13328,7 @@ function enterPatientContext(patient, targetView) {
     if (targetView === 'view-carometro' && typeof reloadCarometroState === 'function') reloadCarometroState();
     if (targetView === 'view-media') loadMediaCards();
     if (targetView === 'view-exercises') loadExerciseCards();
+    if (targetView === 'view-audio') loadAudioClips();
     document.querySelector(`.nav-btn[data-view="${targetView}"]`)?.click();
     if (targetView === 'view-books') refreshBooksFrameSrc();
 }
@@ -13114,6 +13340,7 @@ function exitPatientContext() {
     showEditBars();
     loadMediaCards();
     loadExerciseCards();
+    loadAudioClips();
     if (typeof reloadCarometroState === 'function') reloadCarometroState();
     if (document.querySelector('.nav-btn[data-view="view-books"]')?.classList.contains('active')) refreshBooksFrameSrc();
 }
@@ -13156,12 +13383,20 @@ function updatePatientContextBanners() {
         boText.textContent = `Vendo livros de: ${activePatientContext?.name || ''}`;
         boBanner.style.display = show ? 'flex' : 'none';
     }
+
+    const auBanner = document.getElementById('patient-context-banner-audio');
+    const auText = document.getElementById('patient-context-banner-audio-text');
+    if (auBanner && auText) {
+        auText.textContent = `Vendo áudios de: ${activePatientContext?.name || ''}`;
+        auBanner.style.display = show ? 'flex' : 'none';
+    }
 }
 
 document.getElementById('btn-clear-patient-context-carometro')?.addEventListener('click', exitPatientContext);
 document.getElementById('btn-clear-patient-context-media')?.addEventListener('click', exitPatientContext);
 document.getElementById('btn-clear-patient-context-exercises')?.addEventListener('click', exitPatientContext);
 document.getElementById('btn-clear-patient-context-books')?.addEventListener('click', exitPatientContext);
+document.getElementById('btn-clear-patient-context-audio')?.addEventListener('click', exitPatientContext);
 
 document.getElementById('btn-open-new-patient')?.addEventListener('click', () => {
     newPatientForm?.reset();

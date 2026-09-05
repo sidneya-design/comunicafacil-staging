@@ -457,6 +457,17 @@
         const supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey, { auth: { storage: resilientAuthStorage } });
         const appRedirectUrl = 'app.html' + (useStagingSupabase ? '?sb=staging' : '');
 
+        // "Sair de verdade" ao fechar a aba/navegador — mesmo mecanismo usado
+        // em supabase.js (app.html). sessionStorage some quando a aba/janela
+        // fecha de verdade, mas sobrevive a um F5 normal: é o sinal pra saber
+        // se é a primeira carga desde que o navegador reabriu. Sem isso,
+        // checkSession() abaixo sempre achava o token salvo no localStorage e
+        // pulava a tela de login, mesmo depois de fechar o navegador inteiro
+        // (problema num Chromebook compartilhado entre pacientes na clínica).
+        const TAB_ALIVE_KEY = 'comunica_tab_alive_v1';
+        const isFreshBrowserLaunch = !sessionStorage.getItem(TAB_ALIVE_KEY);
+        sessionStorage.setItem(TAB_ALIVE_KEY, '1');
+
         const form = document.getElementById('login-form');
         const submitBtn = document.getElementById('btn-login-submit');
         const spinner = document.getElementById('login-spinner');
@@ -516,6 +527,16 @@
         async function checkSession() {
             if (isRecoveryLink) {
                 enterRecoveryMode();
+                return;
+            }
+
+            if (isFreshBrowserLaunch) {
+                // scope: 'local' só limpa a sessão salva neste navegador, sem
+                // depender de uma chamada de rede pro Supabase revogar o
+                // token no servidor — não pode travar esperando resposta
+                // numa clínica com internet ruim. Sem sessão, fica na tela
+                // de login mesmo, exigindo login de novo.
+                await supabaseClient.auth.signOut({ scope: 'local' }).catch(() => {});
                 return;
             }
 
