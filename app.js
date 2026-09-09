@@ -13296,8 +13296,9 @@ async function openPatientExercisesModal(patient) {
                     if (!container) throw new Error('Não consegui criar o container do exercício.');
                     exerciseId = container.id;
                 }
-                await supabaseClient.from('patient_exercise_flags')
+                const { error: upsertErr } = await supabaseClient.from('patient_exercise_flags')
                     .upsert({ patient_id: patient.id, exercise_id: exerciseId, visible: newVisible, updated_at: new Date().toISOString() });
+                if (upsertErr) throw upsertErr;
                 openPatientExercisesModal(patient); // recarrega com o novo estado
             } catch (err) {
                 showDoctorPatientsFeedback('Erro ao liberar exercício: ' + err.message, true);
