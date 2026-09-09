@@ -1410,7 +1410,7 @@ async function renderUsageDashboard(idPrefix = 'usage', allowedUserIds = null) {
     const filteredSessions = selectedUserId() ? aggregate.sessions.filter(s => s.userId === selectedUserId()) : aggregate.sessions;
 
     const activeSessions = filteredSessions.filter(session => session.status === 'active')
-        .sort((a, b) => new Date(b.startAt) - new Date(a.startAt))
+        .sort((a, b) => (b.activeSeconds || 0) - (a.activeSeconds || 0))
         .slice(0, 5)
         .map(session => ({
             label: session.email,
@@ -2534,12 +2534,29 @@ let exerciseBlockCounter = 0;
 async function getOrCreateExerciseFork(sourceId, title, doctorUserId) {
     const { data: existing } = await supabaseClient.from('exercises').select('id')
         .eq('doctor_user_id', doctorUserId).eq('forked_from', sourceId).maybeSingle();
-    if (existing) return existing.id;
-    const { data: created, error } = await supabaseClient.from('exercises')
-        .insert([{ title, visible: true, doctor_user_id: doctorUserId, company_id: currentUserCompanyId, forked_from: sourceId }])
-        .select().single();
-    if (error) throw error;
-    return created.id;
+    let forkId;
+    if (existing) {
+        forkId = existing.id;
+    } else {
+        const { data: created, error } = await supabaseClient.from('exercises')
+            .insert([{ title, visible: true, doctor_user_id: doctorUserId, company_id: currentUserCompanyId, forked_from: sourceId }])
+            .select().single();
+        if (error) throw error;
+        forkId = created.id;
+    }
+
+    // Editando dentro do contexto de um paciente (tela "olho") cujo médico já tinha
+    // liberado o exercício global do admin: a cópia recém-criada assume a liberação
+    // no lugar do original, senão o médico editaria a cópia mas o paciente
+    // continuaria vendo (e só teria acesso a) a versão antiga do admin.
+    if (isDoctor && activePatientContext && patientExerciseReleaseMap.get(String(sourceId)) === true) {
+        await supabaseClient.from('patient_exercise_flags')
+            .upsert({ patient_id: activePatientContext.id, exercise_id: forkId, visible: true, updated_at: new Date().toISOString() });
+        await supabaseClient.from('patient_exercise_flags')
+            .upsert({ patient_id: activePatientContext.id, exercise_id: sourceId, visible: false, updated_at: new Date().toISOString() });
+    }
+
+    return forkId;
 }
 
 async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null) {
