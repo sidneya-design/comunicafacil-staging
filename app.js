@@ -3306,6 +3306,21 @@ function renderExerciseCards(exercisesArray) {
                 const patientInfo = doctorPatientsCache.find(p => p.id === ex.patientId);
                 btn.appendChild(createNotifyUsersButton(displayTitle, 'Exercício', { id: ex.patientId, name: patientInfo?.name, email: patientInfo?.email }));
             }
+        } else if (isDoctor && ex.doctorUserId && ex.doctorUserId !== currentUserId && !ex.patientId && ex.companyId && ex.companyId === currentUserCompanyId
+                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real')) {
+            // Exercício do banco de um colega da mesma empresa (não do admin, não
+            // meu): a RLS já libera escrita compartilhada por empresa faz tempo
+            // (migration company_shared_doctor_bank), mas a tela nunca tinha
+            // ganhado o botão de editar pra esse caso — só "isOwnBankExercise"
+            // (o meu) e o global do admin tinham botão. Sem apagar aqui (só
+            // editar): apagar o banco de um colega é mais sensível.
+            const editBtn = document.createElement('button');
+            editBtn.className = 'edit-media-btn'; editBtn.innerHTML = '<i class="fas fa-pencil-alt" aria-hidden="true"></i>'; editBtn.setAttribute('aria-label', 'Editar');
+            editBtn.onclick = (ev) => {
+                ev.stopPropagation();
+                openExerciseEditor(ex);
+            };
+            btn.appendChild(editBtn);
         } else if (isDoctor && !ex.doctorUserId && ex.companyId && ex.companyId === currentUserCompanyId
                    && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real')) {
             // Exercício que o admin mandou direto pra empresa do médico: edita em
