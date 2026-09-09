@@ -3333,7 +3333,13 @@ function renderExerciseCards(exercisesArray) {
         // sílabas hifenizadas — isso é formatação de ensino pra apresentação,
         // não pra um rótulo identificador de card; "a.bra.ço" no card confundia
         // mais do que ajudava, "Abraço" é o que identifica o exercício).
-        if (firstItem && firstItem.imageBlob instanceof Blob) {
+        if (ex.gameKind === 'reading-text') {
+            // Leitura de Texto: a capa mostrando o parágrafo inteiro (via
+            // fallback abaixo) ficava ilegível, espremido num card pequeno —
+            // troca por um ícone de parágrafo, igual ao padrão de ícone dos
+            // outros tipos sem imagem própria.
+            imgContainer.innerHTML = '<i class="fas fa-align-left word-btn-icon" aria-hidden="true"></i>';
+        } else if (firstItem && firstItem.imageBlob instanceof Blob) {
             imgContainer.innerHTML = `<img src="${URL.createObjectURL(firstItem.imageBlob)}" class="word-btn-img" alt="" />`;
         } else if (firstItem && firstItem.image_url) {
             imgContainer.innerHTML = `<img src="${firstItem.image_url}" class="word-btn-img" alt="" />`;
