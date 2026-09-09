@@ -5625,10 +5625,10 @@ function setupModals() {
         const colorVal = document.getElementById('reading-text-exercise-color').value;
         const finalTitle = `${titleVal}|${colorVal}`;
         const textVal = document.getElementById('reading-text-content').value.trim();
-        if (!textVal) return alert("Escreva o texto que a pessoa vai ler.");
         const phrasesVal = Array.from(document.querySelectorAll('.reading-text-phrase-input'))
             .map(input => input.value.trim())
             .filter(Boolean);
+        if (!textVal && phrasesVal.length === 0) return alert("Escreva o texto principal ou adicione ao menos uma frase.");
 
         const targetDoctorUserId = isDoctor ? currentUserId : null;
         const targetCompanyId = isAdmin ? (document.getElementById('reading-text-exercise-target-company')?.value || null) : null;
