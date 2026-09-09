@@ -1499,6 +1499,11 @@
                     <strong>Exercício com Áudio Real</strong>
                     <span>Palavra e sílabas, com um áudio gravado por você em vez de voz sintética.</span>
                 </button>
+                <button type="button" class="exercise-type-option reading-text" id="btn-create-reading-text-exercise">
+                    <i class="fas fa-book-reader" aria-hidden="true"></i>
+                    <strong>Leitura de Texto</strong>
+                    <span>Um parágrafo pra ler, com um botão que lê o texto em voz alta.</span>
+                </button>
                 <button type="button" class="exercise-type-option recognition" id="btn-create-recognition-exercise">
                     <i class="fas fa-eye" aria-hidden="true"></i>
                     <strong>Reconhecimento de Palavras</strong>
@@ -1696,6 +1701,67 @@
                         style="background: linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%);">Salvar Exercício</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Exercício de Leitura de Texto: só título + um parágrafo. Tocar o texto usa
+         o mesmo TTS do resto do app (botão de som), sem destaque palavra-a-palavra. -->
+    <div class="modal-overlay" id="reading-text-exercise-modal" role="dialog" aria-modal="true" aria-labelledby="reading-text-exercise-modal-title">
+        <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2 id="reading-text-exercise-modal-title">Novo Exercício (Leitura de Texto)</h2>
+                <button class="close-modal-btn" id="btn-close-reading-text-exercise" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
+            </div>
+            <form id="reading-text-exercise-form">
+                <div class="form-group">
+                    <label for="reading-text-exercise-title">Nome da Categoria (Ex: Textos - Nível 1)</label>
+                    <input type="text" id="reading-text-exercise-title" required placeholder="Ex: A Fazenda">
+                </div>
+                <div class="form-group">
+                    <label for="reading-text-exercise-color">Cor do Card</label>
+                    <select id="reading-text-exercise-color" style="width: 100%; height: 40px; border: 1px solid #ddd; border-radius: 8px; padding: 0 10px; background: white; cursor: pointer;">
+                        <option value="pink">Rosa</option>
+                        <option value="orange">Laranja</option>
+                        <option value="blue">Azul</option>
+                        <option value="green">Verde</option>
+                        <option value="red">Vermelho</option>
+                        <option value="yellow">Amarelo</option>
+                        <option value="gray">Cinza</option>
+                    </select>
+                </div>
+                <div class="form-group" id="reading-text-exercise-target-company-group" style="display:none;">
+                    <label for="reading-text-exercise-target-company">Enviar para empresa (opcional)</label>
+                    <select id="reading-text-exercise-target-company" style="width: 100%; height: 40px; border: 1px solid #ddd; border-radius: 8px; padding: 0 10px; background: white; cursor: pointer;">
+                        <option value="">Nenhuma (global, todo mundo vê)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="reading-text-content">Texto pra leitura</label>
+                    <textarea id="reading-text-content" required rows="10" placeholder="Cole ou digite aqui o parágrafo que a pessoa vai ler..." style="width: 100%; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 16px; font-family: inherit; resize: vertical;"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" id="btn-cancel-reading-text-exercise">Cancelar</button>
+                    <button type="submit" class="btn-primary"
+                        style="background: linear-gradient(135deg, #93c5fd 0%, #2563eb 100%);">Salvar Exercício</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Player de Leitura de Texto: texto grande + botão de tocar o áudio (TTS). -->
+    <div class="modal-overlay" id="reading-text-player-modal" role="dialog" aria-modal="true" aria-labelledby="reading-text-player-title">
+        <div class="modal-content" style="max-width: 720px;">
+            <div class="modal-header">
+                <h2 id="reading-text-player-title">Leitura de Texto</h2>
+                <button class="close-modal-btn" id="btn-close-reading-text-player" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
+            </div>
+            <p id="reading-text-player-body" style="font-size: 22px; line-height: 1.6; white-space: pre-wrap; padding: 10px 4px 24px;"></p>
+            <div class="modal-footer" style="justify-content: center;">
+                <button type="button" class="btn-primary" id="btn-play-reading-text"
+                    style="background: linear-gradient(135deg, #93c5fd 0%, #2563eb 100%); display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-volume-up" aria-hidden="true"></i> Ouvir leitura
+                </button>
+            </div>
         </div>
     </div>
 

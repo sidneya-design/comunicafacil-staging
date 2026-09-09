@@ -2775,6 +2775,105 @@ async function saveAudioExerciseToDB(title, size, color, font, itemsArray, docto
     }
 }
 
+// Exercício de Leitura de Texto: o mais simples dos tipos de exercício — só
+// título e um parágrafo, guardado como um único exercise_items.word (sem
+// sílabas/imagem/áudio próprio). Tocar o texto reaproveita speakWithAzure,
+// o mesmo TTS usado no resto do app — sem destaque palavra-a-palavra
+// sincronizado com o áudio (fica pra uma fase futura, ver conversa sobre
+// edge-tts WordBoundary).
+let currentEditingReadingTextExerciseId = null;
+let currentEditingReadingTextExerciseFromSupabase = false;
+
+async function saveReadingTextExerciseToDB(title, text, doctorUserId = null, companyId = null) {
+    const shouldTrySupabase = supabaseClient && (!currentEditingReadingTextExerciseId || currentEditingReadingTextExerciseFromSupabase);
+    if (shouldTrySupabase) {
+        try {
+            const deckFields = { title };
+            let targetExerciseId = currentEditingReadingTextExerciseId;
+
+            if (targetExerciseId) {
+                // company_id só entra quando é o admin salvando — ver mesmo
+                // cuidado em saveExercisePlaylistToDB.
+                const updateFields = isAdmin ? { ...deckFields, company_id: companyId } : deckFields;
+                const { error: updateErr } = await supabaseClient.from('exercises').update(updateFields).eq('id', targetExerciseId);
+                if (updateErr) throw updateErr;
+                const { error: deleteErr } = await supabaseClient.from('exercise_items').delete().eq('exercise_id', targetExerciseId);
+                if (deleteErr) throw deleteErr;
+            } else {
+                const newExercisePayload = doctorUserId
+                    ? { ...deckFields, visible: true, game_kind: 'reading-text', doctor_user_id: doctorUserId, company_id: currentUserCompanyId }
+                    : { ...deckFields, visible: false, game_kind: 'reading-text', company_id: companyId };
+                const { data: exData, error: insertErr } = await supabaseClient.from('exercises').insert([newExercisePayload]).select().single();
+                if (insertErr) throw insertErr;
+                targetExerciseId = exData.id;
+            }
+
+            const { error: itemsErr } = await supabaseClient.from('exercise_items').insert([{ exercise_id: targetExerciseId, word: text, link: '' }]);
+            if (itemsErr) throw itemsErr;
+
+            loadExerciseCards();
+            return;
+        } catch (e) {
+            console.warn('Erro ao salvar exercício de leitura de texto no Supabase, caindo para local:', e);
+            alert('Não foi possível salvar o exercício no servidor (ficou salvo só neste dispositivo). Detalhe: ' + (e?.message || e));
+        }
+    }
+
+    const localPayload = { title, items: [{ word: text }], visible: false, gameKind: 'reading-text' };
+    if (currentEditingReadingTextExerciseId) {
+        db.transaction(['exercises'], 'readonly').objectStore('exercises').get(currentEditingReadingTextExerciseId).onsuccess = (e) => {
+            const existing = e.target.result || {};
+            db.transaction(['exercises'], 'readwrite').objectStore('exercises')
+                .put({ ...existing, ...localPayload, id: currentEditingReadingTextExerciseId })
+                .onsuccess = () => loadExerciseCards();
+        };
+    } else {
+        db.transaction(['exercises'], 'readwrite').objectStore('exercises')
+            .add(localPayload)
+            .onsuccess = () => loadExerciseCards();
+    }
+}
+
+function openEditReadingTextExercise(ex) {
+    currentEditingReadingTextExerciseId = ex.id;
+    currentEditingReadingTextExerciseFromSupabase = !!ex.fromSupabase;
+
+    document.getElementById('reading-text-exercise-modal').style.display = 'flex';
+    document.getElementById('reading-text-exercise-modal').querySelector('h2').textContent = "Editar Exercício (Leitura de Texto)";
+
+    const parts = (ex.title || '').split('|');
+    const displayTitle = parts[0];
+    const colorClass = parts[1] || 'pink';
+
+    document.getElementById('reading-text-exercise-title').value = displayTitle;
+    document.getElementById('reading-text-exercise-color').value = colorClass;
+    document.getElementById('reading-text-content').value = (ex.items && ex.items[0] && ex.items[0].word) || '';
+
+    const companyGroup = document.getElementById('reading-text-exercise-target-company-group');
+    if (companyGroup) {
+        companyGroup.style.display = isAdmin ? '' : 'none';
+        if (isAdmin) populateExerciseCompanySelect('reading-text-exercise-target-company', ex.companyId || null);
+    }
+}
+
+function openReadingTextPlayer(ex) {
+    const displayTitle = (ex.title || '').split('|')[0] || ex.title || 'Exercício';
+    const text = (ex.items && ex.items[0] && ex.items[0].word) || '';
+
+    document.getElementById('reading-text-player-modal').style.display = 'flex';
+    document.getElementById('reading-text-player-title').textContent = displayTitle;
+    const bodyEl = document.getElementById('reading-text-player-body');
+    bodyEl.textContent = text;
+    bodyEl.dataset.text = text;
+
+    startUsageActivity(displayTitle, {
+        key: `exercise:${ex.id || displayTitle}`,
+        group: 'Exercícios',
+        view: 'view-exercises',
+        detail: 'Exercício aberto'
+    });
+}
+
 // Adiciona um exercício do "Banco de Prontos" (global do admin, ou um dos 2
 // decks semeados só localmente via practiceExerciseSeeds) como um exercício
 // de verdade no banco do médico — mesmo formato de item de "Novo
@@ -3110,11 +3209,13 @@ function renderExerciseCards(exercisesArray) {
         else if (ex.gameKind === 'afasia') openAfasiaDeckManage(ex);
         else if (ex.gameKind === 'syllables') openEditSyllablesExercise(ex);
         else if (ex.gameKind === 'audio-real') openEditAudioExercise(ex);
+        else if (ex.gameKind === 'reading-text') openEditReadingTextExercise(ex);
         else openEditExercise(ex);
     };
     const openExerciseCard = (ex) => {
         if (ex.gameKind === 'naming') playNamingDeck(ex);
         else if (ex.gameKind === 'afasia') playAfasiaDeck(ex);
+        else if (ex.gameKind === 'reading-text') openReadingTextPlayer(ex);
         else openPresentationPlaylist(ex);
     };
 
@@ -3307,7 +3408,7 @@ function renderExerciseCards(exercisesArray) {
                 btn.appendChild(createNotifyUsersButton(displayTitle, 'Exercício', { id: ex.patientId, name: patientInfo?.name, email: patientInfo?.email }));
             }
         } else if (isDoctor && ex.doctorUserId && ex.doctorUserId !== currentUserId && !ex.patientId && ex.companyId && ex.companyId === currentUserCompanyId
-                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real')) {
+                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text')) {
             // Exercício do banco de um colega da mesma empresa (não do admin, não
             // meu): a RLS já libera escrita compartilhada por empresa faz tempo
             // (migration company_shared_doctor_bank), mas a tela nunca tinha
@@ -3322,7 +3423,7 @@ function renderExerciseCards(exercisesArray) {
             };
             btn.appendChild(editBtn);
         } else if (isDoctor && !ex.doctorUserId && ex.companyId && ex.companyId === currentUserCompanyId
-                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real')) {
+                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text')) {
             // Exercício que o admin mandou direto pra empresa do médico: edita em
             // cima do original (a RLS libera essa escrita pra qualquer médico da
             // empresa) — sem fork, os colegas continuam vendo a mesma versão.
@@ -5420,6 +5521,63 @@ function setupModals() {
         const targetCompanyId = isAdmin ? (document.getElementById('audio-exercise-target-company')?.value || null) : null;
         saveAudioExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, itemsArray, targetDoctorUserId, targetCompanyId);
         closeAudioExerciseUpload();
+    });
+
+    const openReadingTextExerciseCreator = () => {
+        closeExerciseType();
+        currentEditingReadingTextExerciseId = null;
+        currentEditingReadingTextExerciseFromSupabase = false;
+
+        document.getElementById('reading-text-exercise-modal').style.display = 'flex';
+        document.getElementById('reading-text-exercise-modal').querySelector('h2').textContent = "Novo Exercício (Leitura de Texto)";
+        document.getElementById('reading-text-exercise-form').reset();
+
+        const readingTextCompanyGroup = document.getElementById('reading-text-exercise-target-company-group');
+        if (readingTextCompanyGroup) {
+            readingTextCompanyGroup.style.display = isAdmin ? '' : 'none';
+            if (isAdmin) populateExerciseCompanySelect('reading-text-exercise-target-company', null);
+        }
+    };
+    document.getElementById('btn-create-reading-text-exercise').addEventListener('click', openReadingTextExerciseCreator);
+
+    const closeReadingTextExerciseUpload = () => { document.getElementById('reading-text-exercise-modal').style.display = 'none'; document.getElementById('reading-text-exercise-form').reset(); };
+    document.getElementById('btn-close-reading-text-exercise').addEventListener('click', closeReadingTextExerciseUpload);
+    document.getElementById('btn-cancel-reading-text-exercise').addEventListener('click', closeReadingTextExerciseUpload);
+
+    document.getElementById('reading-text-exercise-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!isAdmin && !isDoctor) {
+            alert('Apenas administradores ou médicos podem salvar exercícios.');
+            return;
+        }
+        const titleVal = document.getElementById('reading-text-exercise-title').value.trim();
+        const colorVal = document.getElementById('reading-text-exercise-color').value;
+        const finalTitle = `${titleVal}|${colorVal}`;
+        const textVal = document.getElementById('reading-text-content').value.trim();
+        if (!textVal) return alert("Escreva o texto que a pessoa vai ler.");
+
+        const targetDoctorUserId = isDoctor ? currentUserId : null;
+        const targetCompanyId = isAdmin ? (document.getElementById('reading-text-exercise-target-company')?.value || null) : null;
+        saveReadingTextExerciseToDB(finalTitle, textVal, targetDoctorUserId, targetCompanyId);
+        closeReadingTextExerciseUpload();
+    });
+
+    document.getElementById('btn-close-reading-text-player').addEventListener('click', () => {
+        stopUsageActivity('fechar-leitura-texto');
+        document.getElementById('reading-text-player-modal').style.display = 'none';
+        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    });
+
+    document.getElementById('btn-play-reading-text').addEventListener('click', () => {
+        const text = document.getElementById('reading-text-player-body').dataset.text || '';
+        if (!text) return;
+        trackUsageActivity(usageCurrentActivity?.label || 'Exercício', {
+            key: `exercise:speak:${usageCurrentActivity?.label || 'Exercício'}`,
+            group: 'Exercícios',
+            detail: 'Ouviu leitura de texto'
+        });
+        speakWithAzure(text);
     });
 
     document.getElementById('btn-close-video').addEventListener('click', () => {

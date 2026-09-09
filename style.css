@@ -342,6 +342,8 @@ body {
 .exercise-type-option.ready-bank i { color: #16a34a; }
 .exercise-type-option.audio-real { border-color: #5eead4; }
 .exercise-type-option.audio-real i { color: #0d9488; }
+.exercise-type-option.reading-text { border-color: #93c5fd; }
+.exercise-type-option.reading-text i { color: #2563eb; }
 @media (max-width: 600px) {
     .exercise-type-grid { grid-template-columns: 1fr; }
     .exercise-type-option { min-height: 145px; }
