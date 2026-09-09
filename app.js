@@ -2963,8 +2963,15 @@ function openReadingTextPlayer(ex) {
     const bodyEl = document.getElementById('reading-text-player-body');
     bodyEl.textContent = text;
     bodyEl.dataset.text = text;
+    bodyEl.style.display = text ? '' : 'none';
     readingTextActiveButton = null;
-    setReadingTextButtonPlaying(document.getElementById('btn-play-reading-text'), false);
+    const mainPlayBtn = document.getElementById('btn-play-reading-text');
+    // Exercício criado só com frases (sem parágrafo principal, ver validação
+    // do editor): sem texto, o botão grande "Ouvir leitura" não tem o que
+    // tocar e clicar nele não fazia nada — confuso. Some com ele, a
+    // velocidade continua valendo pro play de cada frase.
+    mainPlayBtn.style.display = text ? '' : 'none';
+    setReadingTextButtonPlaying(mainPlayBtn, false);
 
     const phrasesEl = document.getElementById('reading-text-player-phrases');
     phrasesEl.innerHTML = '';
