@@ -696,6 +696,30 @@ body {
     background: rgba(59, 130, 246, 0.04);
 }
 
+.usage-detail-table th.usage-sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.usage-detail-table th.usage-sortable:hover {
+    color: #3b82f6;
+}
+
+.usage-detail-table th.usage-sort-active {
+    color: #3b82f6;
+}
+
+.usage-sort-arrow {
+    display: inline-block;
+    margin-left: 3px;
+    font-size: 10px;
+    opacity: 0.4;
+}
+
+.usage-detail-table th.usage-sort-active .usage-sort-arrow {
+    opacity: 1;
+}
+
 .admin-tabbar {
     display: inline-flex;
     gap: 8px;

@@ -358,6 +358,9 @@ let usageLastHeartbeatAt = 0;
 // todo mundo, médico vê só os próprios pacientes) — cada instância guarda
 // o próprio filtro de usuário selecionado, chaveado pelo idPrefix do DOM.
 let usageSelectedUserIdByPrefix = { usage: null };
+// Ordenação da tabela "Detalhe por atividade" também é por instância (admin/médico),
+// já que cada uma pode ser ajustada de forma independente pelo usuário.
+let usageTableSortByPrefix = {};
 let usageCurrentSection = 'view-core';
 let usageSectionLastActiveAt = Date.now();
 
@@ -1244,6 +1247,54 @@ function renderUsageActivityTable(containerId, items, emptyText) {
     });
 }
 
+function compareUsageTableEntries(a, b, key, dir) {
+    let av, bv;
+    if (key === 'label') {
+        const cmp = (a.label || '').localeCompare(b.label || '', 'pt-BR', { numeric: true, sensitivity: 'base' });
+        return dir === 'asc' ? cmp : -cmp;
+    }
+    if (key === 'average') {
+        av = a.count > 0 ? (a.totalSeconds || 0) / a.count : -1;
+        bv = b.count > 0 ? (b.totalSeconds || 0) / b.count : -1;
+    } else if (key === 'count') {
+        av = a.count || 0;
+        bv = b.count || 0;
+    } else if (key === 'lastAccessAt') {
+        av = a.lastAccessAt ? new Date(a.lastAccessAt).getTime() : -Infinity;
+        bv = b.lastAccessAt ? new Date(b.lastAccessAt).getTime() : -Infinity;
+    } else {
+        av = a.totalSeconds || 0;
+        bv = b.totalSeconds || 0;
+    }
+    return dir === 'asc' ? av - bv : bv - av;
+}
+
+function wireUsageTableSorting(idPrefix, tableBodyId, tableSort, onChange) {
+    const tbody = document.getElementById(tableBodyId);
+    const table = tbody ? tbody.closest('table') : null;
+    if (!table) return;
+    const headers = table.querySelectorAll('thead th[data-sort-key]');
+    headers.forEach(th => {
+        const key = th.dataset.sortKey;
+        const isActive = tableSort.key === key;
+        th.classList.toggle('usage-sort-active', isActive);
+        const arrow = th.querySelector('.usage-sort-arrow');
+        if (arrow) arrow.textContent = isActive ? (tableSort.dir === 'asc' ? '▲' : '▼') : '↕';
+        if (!th.dataset.sortWiredFor || th.dataset.sortWiredFor !== idPrefix) {
+            th.addEventListener('click', () => {
+                if (tableSort.key === key) {
+                    tableSort.dir = tableSort.dir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    tableSort.key = key;
+                    tableSort.dir = key === 'label' ? 'asc' : 'desc';
+                }
+                onChange();
+            });
+            th.dataset.sortWiredFor = idPrefix;
+        }
+    });
+}
+
 async function renderUsageDashboard(idPrefix = 'usage', allowedUserIds = null) {
     const id = (suffix) => `${idPrefix}-${suffix}`;
     if (usageSelectedUserIdByPrefix[idPrefix] === undefined) usageSelectedUserIdByPrefix[idPrefix] = null;
@@ -1329,19 +1380,16 @@ async function renderUsageDashboard(idPrefix = 'usage', allowedUserIds = null) {
         label: formatUsageActivityDisplayLabel(meta.label),
         value: normalizeActivityStats((selectedUserId() && selectedUserRecord) ? (selectedUserRecord.activities[meta.label] || 0) : (aggregate.activityStatsTotals[meta.label] || 0))
     }));
+    if (!usageTableSortByPrefix[idPrefix]) usageTableSortByPrefix[idPrefix] = { key: 'totalSeconds', dir: 'desc' };
+    const tableSort = usageTableSortByPrefix[idPrefix];
     const activityTableEntries = [...catalogActivityEntries]
-        .sort((a, b) => {
-            if ((b.value.totalSeconds || 0) !== (a.value.totalSeconds || 0)) {
-                return (b.value.totalSeconds || 0) - (a.value.totalSeconds || 0);
-            }
-            return (b.value.count || 0) - (a.value.count || 0);
-        })
         .map(item => ({
             label: item.label,
             totalSeconds: item.value.totalSeconds || 0,
             count: item.value.count || 0,
             lastAccessAt: item.value.lastAccessAt
-        }));
+        }))
+        .sort((a, b) => compareUsageTableEntries(a, b, tableSort.key, tableSort.dir));
     const lowActivities = [...catalogActivityEntries]
         .sort((a, b) => {
             if ((a.value.totalSeconds || 0) !== (b.value.totalSeconds || 0)) {
@@ -1460,6 +1508,7 @@ async function renderUsageDashboard(idPrefix = 'usage', allowedUserIds = null) {
     renderUsageList(id('activities-durations'), lowActivities, 'Ainda não há dados de tempo registrados');
     renderUsageList(id('live-sessions'), activeSessions, 'Nenhuma sessão ativa agora');
     renderUsageActivityTable(id('activity-table-body'), activityTableEntries, 'Nenhuma atividade registrada ainda');
+    wireUsageTableSorting(idPrefix, id('activity-table-body'), tableSort, () => renderUsageDashboard(idPrefix, allowedUserIds));
 
     const timeline = document.getElementById(id('event-log'));
     if (timeline) {
