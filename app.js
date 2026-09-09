@@ -2648,7 +2648,7 @@ async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null, 
 let currentEditingSyllablesExerciseId = null;
 let currentEditingSyllablesExerciseFromSupabase = false;
 
-async function saveSyllablesExerciseToDB(title, size, color, font, itemsArray, doctorUserId = null) {
+async function saveSyllablesExerciseToDB(title, size, color, font, itemsArray, doctorUserId = null, companyId = null) {
     const shouldTrySupabase = supabaseClient && (!currentEditingSyllablesExerciseId || currentEditingSyllablesExerciseFromSupabase);
     if (shouldTrySupabase) {
         try {
@@ -2656,14 +2656,17 @@ async function saveSyllablesExerciseToDB(title, size, color, font, itemsArray, d
             let targetExerciseId = currentEditingSyllablesExerciseId;
 
             if (targetExerciseId) {
-                const { error: updateErr } = await supabaseClient.from('exercises').update(deckFields).eq('id', targetExerciseId);
+                // company_id só entra quando é o admin salvando — ver mesmo
+                // cuidado em saveExercisePlaylistToDB.
+                const updateFields = isAdmin ? { ...deckFields, company_id: companyId } : deckFields;
+                const { error: updateErr } = await supabaseClient.from('exercises').update(updateFields).eq('id', targetExerciseId);
                 if (updateErr) throw updateErr;
                 const { error: deleteErr } = await supabaseClient.from('exercise_items').delete().eq('exercise_id', targetExerciseId);
                 if (deleteErr) throw deleteErr;
             } else {
                 const newExercisePayload = doctorUserId
                     ? { ...deckFields, visible: true, game_kind: 'syllables', doctor_user_id: doctorUserId, company_id: currentUserCompanyId }
-                    : { ...deckFields, visible: false, game_kind: 'syllables' };
+                    : { ...deckFields, visible: false, game_kind: 'syllables', company_id: companyId };
                 const { data: exData, error: insertErr } = await supabaseClient.from('exercises').insert([newExercisePayload]).select().single();
                 if (insertErr) throw insertErr;
                 targetExerciseId = exData.id;
@@ -2703,7 +2706,7 @@ async function saveSyllablesExerciseToDB(title, size, color, font, itemsArray, d
 let currentEditingAudioExerciseId = null;
 let currentEditingAudioExerciseFromSupabase = false;
 
-async function saveAudioExerciseToDB(title, size, color, font, itemsArray, doctorUserId = null) {
+async function saveAudioExerciseToDB(title, size, color, font, itemsArray, doctorUserId = null, companyId = null) {
     // Sobe (ou reaproveita, se o item não trocou o arquivo na edição) o áudio
     // e a imagem opcional de cada palavra antes de gravar os itens — mesmo
     // padrão de uploadToSupabaseStorage já usado pra imagem/áudio em outras
@@ -2728,14 +2731,17 @@ async function saveAudioExerciseToDB(title, size, color, font, itemsArray, docto
             let targetExerciseId = currentEditingAudioExerciseId;
 
             if (targetExerciseId) {
-                const { error: updateErr } = await supabaseClient.from('exercises').update(deckFields).eq('id', targetExerciseId);
+                // company_id só entra quando é o admin salvando — ver mesmo
+                // cuidado em saveExercisePlaylistToDB.
+                const updateFields = isAdmin ? { ...deckFields, company_id: companyId } : deckFields;
+                const { error: updateErr } = await supabaseClient.from('exercises').update(updateFields).eq('id', targetExerciseId);
                 if (updateErr) throw updateErr;
                 const { error: deleteErr } = await supabaseClient.from('exercise_items').delete().eq('exercise_id', targetExerciseId);
                 if (deleteErr) throw deleteErr;
             } else {
                 const newExercisePayload = doctorUserId
                     ? { ...deckFields, visible: true, game_kind: 'audio-real', doctor_user_id: doctorUserId, company_id: currentUserCompanyId }
-                    : { ...deckFields, visible: false, game_kind: 'audio-real' };
+                    : { ...deckFields, visible: false, game_kind: 'audio-real', company_id: companyId };
                 const { data: exData, error: insertErr } = await supabaseClient.from('exercises').insert([newExercisePayload]).select().single();
                 if (insertErr) throw insertErr;
                 targetExerciseId = exData.id;
@@ -3300,15 +3306,18 @@ function renderExerciseCards(exercisesArray) {
                 const patientInfo = doctorPatientsCache.find(p => p.id === ex.patientId);
                 btn.appendChild(createNotifyUsersButton(displayTitle, 'Exercício', { id: ex.patientId, name: patientInfo?.name, email: patientInfo?.email }));
             }
-        } else if (isDoctor && !ex.doctorUserId && ex.companyId && ex.companyId === currentUserCompanyId && !ex.gameKind) {
+        } else if (isDoctor && !ex.doctorUserId && ex.companyId && ex.companyId === currentUserCompanyId
+                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real')) {
             // Exercício que o admin mandou direto pra empresa do médico: edita em
             // cima do original (a RLS libera essa escrita pra qualquer médico da
             // empresa) — sem fork, os colegas continuam vendo a mesma versão.
+            // Naming/afasia ficam de fora (deck manage próprio, formato
+            // correct/distractor, não compatível com esse fluxo de edição direta).
             const editBtn = document.createElement('button');
             editBtn.className = 'edit-media-btn'; editBtn.innerHTML = '<i class="fas fa-pencil-alt" aria-hidden="true"></i>'; editBtn.setAttribute('aria-label', 'Editar');
             editBtn.onclick = (ev) => {
                 ev.stopPropagation();
-                openEditExercise(ex);
+                openExerciseEditor(ex);
             };
             btn.appendChild(editBtn);
         } else if (isDoctor && !ex.doctorUserId && !ex.gameKind) {
@@ -4425,6 +4434,12 @@ function openEditAudioExercise(ex) {
     document.getElementById('audio-text-color').value = ex.syllablesColor || '#1f1f1f';
     document.getElementById('audio-font').value = ex.syllablesFont || "'Outfit', sans-serif";
 
+    const audioCompanyGroup = document.getElementById('audio-exercise-target-company-group');
+    if (audioCompanyGroup) {
+        audioCompanyGroup.style.display = isAdmin ? '' : 'none';
+        if (isAdmin) populateExerciseCompanySelect('audio-exercise-target-company', ex.companyId || null);
+    }
+
     const container = document.getElementById('audio-items-container');
     container.innerHTML = '';
 
@@ -4483,7 +4498,7 @@ function openEditExercise(ex) {
     const companyGroup = document.getElementById('exercise-target-company-group');
     if (companyGroup) {
         companyGroup.style.display = isAdmin ? '' : 'none';
-        if (isAdmin) populateExerciseCompanySelect(ex.companyId || null);
+        if (isAdmin) populateExerciseCompanySelect('exercise-target-company', ex.companyId || null);
     }
 
     const container = document.getElementById('exercise-items-container');
@@ -4528,6 +4543,12 @@ function openEditSyllablesExercise(ex) {
     document.getElementById('syllables-text-size').value = ex.syllablesSize || '100';
     document.getElementById('syllables-text-color').value = ex.syllablesColor || '#1f1f1f';
     document.getElementById('syllables-font').value = ex.syllablesFont || "'Outfit', sans-serif";
+
+    const syllablesCompanyGroup = document.getElementById('syllables-exercise-target-company-group');
+    if (syllablesCompanyGroup) {
+        syllablesCompanyGroup.style.display = isAdmin ? '' : 'none';
+        if (isAdmin) populateExerciseCompanySelect('syllables-exercise-target-company', ex.companyId || null);
+    }
 
     const container = document.getElementById('syllables-items-container');
     container.innerHTML = '';
@@ -5056,7 +5077,7 @@ function setupModals() {
         const companyGroup = document.getElementById('exercise-target-company-group');
         if (companyGroup) {
             companyGroup.style.display = isAdmin ? '' : 'none';
-            if (isAdmin) populateExerciseCompanySelect(null);
+            if (isAdmin) populateExerciseCompanySelect('exercise-target-company', null);
         }
 
         const container = document.getElementById('exercise-items-container');
@@ -5246,6 +5267,12 @@ function setupModals() {
         document.getElementById('syllables-exercise-modal').querySelector('h2').textContent = "Novo Exercício (Sílabas)";
         document.getElementById('syllables-exercise-form').reset();
 
+        const companyGroup = document.getElementById('syllables-exercise-target-company-group');
+        if (companyGroup) {
+            companyGroup.style.display = isAdmin ? '' : 'none';
+            if (isAdmin) populateExerciseCompanySelect('syllables-exercise-target-company', null);
+        }
+
         const container = document.getElementById('syllables-items-container');
         container.innerHTML = '';
         addSyllablesItemBlock();
@@ -5293,7 +5320,8 @@ function setupModals() {
         if (missingSyllables) return alert("Toda palavra deste exercício precisa do campo \"Sílabas\" preenchido.");
 
         const targetDoctorUserId = isDoctor ? currentUserId : null;
-        saveSyllablesExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, itemsArray, targetDoctorUserId);
+        const targetCompanyId = isAdmin ? (document.getElementById('syllables-exercise-target-company')?.value || null) : null;
+        saveSyllablesExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, itemsArray, targetDoctorUserId, targetCompanyId);
         closeSyllablesExerciseUpload();
     });
 
@@ -5308,6 +5336,12 @@ function setupModals() {
         document.getElementById('audio-exercise-modal').style.display = 'flex';
         document.getElementById('audio-exercise-modal').querySelector('h2').textContent = "Novo Exercício (Áudio Real)";
         document.getElementById('audio-exercise-form').reset();
+
+        const audioCompanyGroup = document.getElementById('audio-exercise-target-company-group');
+        if (audioCompanyGroup) {
+            audioCompanyGroup.style.display = isAdmin ? '' : 'none';
+            if (isAdmin) populateExerciseCompanySelect('audio-exercise-target-company', null);
+        }
 
         const container = document.getElementById('audio-items-container');
         container.innerHTML = '';
@@ -5368,7 +5402,8 @@ function setupModals() {
         if (missingAudio) return alert("Toda palavra deste exercício precisa de um áudio gravado (.mp3 ou .wav).");
 
         const targetDoctorUserId = isDoctor ? currentUserId : null;
-        saveAudioExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, itemsArray, targetDoctorUserId);
+        const targetCompanyId = isAdmin ? (document.getElementById('audio-exercise-target-company')?.value || null) : null;
+        saveAudioExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, itemsArray, targetDoctorUserId, targetCompanyId);
         closeAudioExerciseUpload();
     });
 
@@ -12523,12 +12558,13 @@ function populateCompanySelect() {
     if (current && companiesCache.some(c => c.id === current)) select.value = current;
 }
 
-// Seletor "Enviar para empresa" no editor de exercício (Slides) — só pro admin,
-// só existe assim: exercício com company_id (sem doctor_user_id) fica editável
-// direto por qualquer médico daquela empresa (ver migration
-// company_doctors_edit_admin_exercises), em vez do fork de sempre.
-async function populateExerciseCompanySelect(selectedCompanyId) {
-    const select = document.getElementById('exercise-target-company');
+// Seletor "Enviar para empresa" nos editores de exercício (Slides, Sílabas,
+// Áudio Real) — só pro admin, só existe assim: exercício com company_id (sem
+// doctor_user_id) fica editável direto por qualquer médico daquela empresa
+// (ver migration company_doctors_edit_admin_exercises), em vez do fork de
+// sempre. selectId identifica qual dos três modais está populando.
+async function populateExerciseCompanySelect(selectId, selectedCompanyId) {
+    const select = document.getElementById(selectId);
     if (!select) return;
     if (!companiesCache.length) {
         try {
