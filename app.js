@@ -13299,7 +13299,14 @@ async function openPatientExercisesModal(patient) {
                 const { error: upsertErr } = await supabaseClient.from('patient_exercise_flags')
                     .upsert({ patient_id: patient.id, exercise_id: exerciseId, visible: newVisible, updated_at: new Date().toISOString() });
                 if (upsertErr) throw upsertErr;
-                openPatientExercisesModal(patient); // recarrega com o novo estado
+                // Recarrega com o novo estado, mas preservando a rolagem — a
+                // lista pode ter dezenas de itens, e sem isso cada clique
+                // jogava a tela de volta pro topo, obrigando a rolar até
+                // achar o próximo item de novo.
+                const scrollEl = document.querySelector('#patient-exercises-modal .modal-content');
+                const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
+                await openPatientExercisesModal(patient);
+                if (scrollEl) scrollEl.scrollTop = scrollTop;
             } catch (err) {
                 showDoctorPatientsFeedback('Erro ao liberar exercício: ' + err.message, true);
             }
