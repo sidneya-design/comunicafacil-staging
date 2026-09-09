@@ -1892,47 +1892,60 @@ async function getIaEndpointHeaders() {
     return headers;
 }
 
-async function fetchTtsAudio(endpoint, text) {
+async function fetchTtsAudio(endpoint, text, ttsRate) {
+    const body = { ttsText: text };
+    if (ttsRate) body.ttsRate = ttsRate;
     const response = await fetch(endpoint, {
         method: 'POST',
         headers: await getIaEndpointHeaders(),
-        body: JSON.stringify({ ttsText: text })
+        body: JSON.stringify(body)
     });
     const data = await response.json();
     if (!response.ok || !data.audio) throw new Error(data.error || `Erro HTTP ${response.status}`);
     return data.audio;
 }
 
-function getTtsAudio(text) {
-    if (azureTtsCache.has(text)) return azureTtsCache.get(text);
+// rateKey identifica o cache ("" = voz normal de sempre, mesma chave já usada
+// em produção); ttsRate é o valor de verdade mandado pro backend (SSML
+// <prosody rate>), só quando rateKey não é o padrão.
+function getTtsAudio(text, rateKey, ttsRate) {
+    const cacheKey = rateKey ? (text + '::rate::' + rateKey) : text;
+    if (azureTtsCache.has(cacheKey)) return azureTtsCache.get(cacheKey);
     const promise = (async () => {
         try {
-            const stored = localStorage.getItem(TTS_STORAGE_PREFIX + text);
+            const stored = localStorage.getItem(TTS_STORAGE_PREFIX + cacheKey);
             if (stored) return stored;
         } catch (e) { /* localStorage indisponível: segue para o backend */ }
         let audioBase64;
         try {
-            audioBase64 = await fetchTtsAudio(AZURE_AI_ENDPOINT, text);
+            audioBase64 = await fetchTtsAudio(AZURE_AI_ENDPOINT, text, ttsRate);
         } catch (primaryError) {
             if (AZURE_AI_ENDPOINT === SUPABASE_CHAT_ENDPOINT) throw primaryError;
-            audioBase64 = await fetchTtsAudio(SUPABASE_CHAT_ENDPOINT, text);
+            audioBase64 = await fetchTtsAudio(SUPABASE_CHAT_ENDPOINT, text, ttsRate);
         }
         try {
-            localStorage.setItem(TTS_STORAGE_PREFIX + text, audioBase64);
+            localStorage.setItem(TTS_STORAGE_PREFIX + cacheKey, audioBase64);
         } catch (e) {
             evictTtsLocalStorageCache();
-            try { localStorage.setItem(TTS_STORAGE_PREFIX + text, audioBase64); } catch (e2) { /* quota cheia: só memória */ }
+            try { localStorage.setItem(TTS_STORAGE_PREFIX + cacheKey, audioBase64); } catch (e2) { /* quota cheia: só memória */ }
         }
         return audioBase64;
     })();
-    promise.catch(() => azureTtsCache.delete(text)); // falha não fica em cache; próximo clique tenta de novo
-    azureTtsCache.set(text, promise);
+    promise.catch(() => azureTtsCache.delete(cacheKey)); // falha não fica em cache; próximo clique tenta de novo
+    azureTtsCache.set(cacheKey, promise);
     return promise;
 }
 
 function prefetchTts(text) {
     if (text) getTtsAudio(text).catch(() => { /* erro tratado no clique */ });
 }
+
+// Velocidades do player de "Leitura de Texto": sintetizadas já na velocidade
+// certa via SSML <prosody rate> (edge-tts/edge_tts.ts) — não é o playbackRate
+// do <audio> esticando o som depois de pronto, que soa robótico/ruim,
+// principalmente mais devagar. "1" (padrão) não manda ttsRate nenhum: fica
+// idêntico à voz normal de sempre em todo o resto do app.
+const READING_TEXT_RATE_MAP = { '0.75': '-30%', '1': null, '1.25': '+15%', '1.5': '+35%' };
 
 // Função principal de áudio — usada em todo o app (cards, jogos, compositor).
 // Usa a voz neural FranciscaNeural via edge-tts com fallback para o navegador.
@@ -1941,21 +1954,16 @@ function prefetchTts(text) {
 // tempo: se a resposta de uma chamada mais antiga chega depois de uma mais nova
 // já ter assumido, ela é descartada em vez de tocar por cima da atual.
 let ttsRequestId = 0;
-async function speakWithAzure(text, rate = 1) {
+async function speakWithAzure(text, rateKey) {
     if (!text) return;
     const myRequestId = ++ttsRequestId;
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     if (currentAudio) { currentAudio.pause(); currentAudio = null; }
     try {
-        const audioBase64 = await getTtsAudio(text);
+        const ttsRate = rateKey ? (READING_TEXT_RATE_MAP[rateKey] || null) : null;
+        const audioBase64 = await getTtsAudio(text, ttsRate ? rateKey : null, ttsRate);
         if (myRequestId !== ttsRequestId) return;
         currentAudio = new Audio('data:audio/mp3;base64,' + audioBase64);
-        // Ajuste de velocidade (Leitura de Texto) via playbackRate do próprio
-        // <audio> — o áudio do backend continua sempre gravado na velocidade
-        // normal (mesmo cache pra qualquer rate), só a reprodução muda. Evita
-        // depender de rota de TTS com "rate" no backend, que só existe local
-        // (server.py /tts) e não tem equivalente na Edge Function de produção.
-        currentAudio.playbackRate = rate;
         await currentAudio.play();
     } catch (e) {
         if (myRequestId !== ttsRequestId) return;
@@ -2898,6 +2906,53 @@ function openEditReadingTextExercise(ex) {
     }
 }
 
+// Play/parar do player de Leitura de Texto: um botão só alterna entre os dois
+// estados, tanto o do parágrafo principal quanto o de cada frase. Como só
+// toca um áudio por vez (speakWithAzure já pausa o anterior), guarda qual
+// botão está "tocando" pra resetar o ícone dele quando outro assume ou
+// quando o áudio termina sozinho.
+let readingTextActiveButton = null;
+
+function setReadingTextButtonPlaying(button, isPlaying) {
+    if (!button) return;
+    const icon = button.querySelector('i');
+    if (icon) icon.className = isPlaying ? 'fas fa-stop' : 'fas fa-volume-up';
+    const label = button.querySelector('.reading-text-play-label');
+    if (label) label.textContent = isPlaying ? 'Parar' : 'Ouvir leitura';
+    else button.title = isPlaying ? 'Parar' : 'Ouvir esta frase';
+}
+
+async function toggleReadingTextPlayback(text, button, activityDetail) {
+    if (!text) return;
+    if (readingTextActiveButton === button) {
+        if (currentAudio) currentAudio.pause();
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+        setReadingTextButtonPlaying(button, false);
+        readingTextActiveButton = null;
+        return;
+    }
+    if (readingTextActiveButton) setReadingTextButtonPlaying(readingTextActiveButton, false);
+    readingTextActiveButton = button;
+    setReadingTextButtonPlaying(button, true);
+
+    const label = usageCurrentActivity?.label || 'Exercício';
+    trackUsageActivity(label, {
+        key: `exercise:speak:${label}`,
+        group: 'Exercícios',
+        detail: activityDetail
+    });
+    const rateKey = document.getElementById('reading-text-speed')?.value || '1';
+    await speakWithAzure(text, rateKey);
+    if (readingTextActiveButton === button && currentAudio) {
+        currentAudio.addEventListener('ended', () => {
+            if (readingTextActiveButton === button) {
+                setReadingTextButtonPlaying(button, false);
+                readingTextActiveButton = null;
+            }
+        }, { once: true });
+    }
+}
+
 function openReadingTextPlayer(ex) {
     const displayTitle = (ex.title || '').split('|')[0] || ex.title || 'Exercício';
     const text = (ex.items && ex.items[0] && ex.items[0].word) || '';
@@ -2908,6 +2963,8 @@ function openReadingTextPlayer(ex) {
     const bodyEl = document.getElementById('reading-text-player-body');
     bodyEl.textContent = text;
     bodyEl.dataset.text = text;
+    readingTextActiveButton = null;
+    setReadingTextButtonPlaying(document.getElementById('btn-play-reading-text'), false);
 
     const phrasesEl = document.getElementById('reading-text-player-phrases');
     phrasesEl.innerHTML = '';
@@ -2921,13 +2978,7 @@ function openReadingTextPlayer(ex) {
         playBtn.title = 'Ouvir esta frase';
         playBtn.innerHTML = '<i class="fas fa-volume-up" aria-hidden="true"></i>';
         playBtn.addEventListener('click', () => {
-            trackUsageActivity(displayTitle, {
-                key: `exercise:speak:${displayTitle}`,
-                group: 'Exercícios',
-                detail: 'Ouviu frase: ' + phrase
-            });
-            const rate = parseFloat(document.getElementById('reading-text-speed')?.value) || 1;
-            speakWithAzure(phrase, rate);
+            toggleReadingTextPlayback(phrase, playBtn, 'Ouviu frase: ' + phrase);
         });
         row.appendChild(span);
         row.appendChild(playBtn);
@@ -5654,18 +5705,13 @@ function setupModals() {
         document.getElementById('reading-text-player-modal').style.display = 'none';
         if (currentAudio) { currentAudio.pause(); currentAudio = null; }
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+        setReadingTextButtonPlaying(document.getElementById('btn-play-reading-text'), false);
+        readingTextActiveButton = null;
     });
 
-    document.getElementById('btn-play-reading-text').addEventListener('click', () => {
+    document.getElementById('btn-play-reading-text').addEventListener('click', (e) => {
         const text = document.getElementById('reading-text-player-body').dataset.text || '';
-        if (!text) return;
-        trackUsageActivity(usageCurrentActivity?.label || 'Exercício', {
-            key: `exercise:speak:${usageCurrentActivity?.label || 'Exercício'}`,
-            group: 'Exercícios',
-            detail: 'Ouviu leitura de texto'
-        });
-        const rate = parseFloat(document.getElementById('reading-text-speed')?.value) || 1;
-        speakWithAzure(text, rate);
+        toggleReadingTextPlayback(text, e.currentTarget, 'Ouviu leitura de texto');
     });
 
     document.getElementById('btn-close-video').addEventListener('click', () => {

@@ -121,7 +121,8 @@ class FrameParser {
 export async function edgeTtsSynthesize(
   text: string,
   voice = "pt-BR-FranciscaNeural",
-  timeoutMs = 20000,
+  rate = "-15%",
+  timeoutMs = 60000,
 ): Promise<Uint8Array> {
   const secMsGec = await generateSecMsGec();
   const query =
@@ -187,7 +188,7 @@ export async function edgeTtsSynthesize(
     const ssml =
       "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>" +
       `<voice name='${voice}'>` +
-      "<prosody pitch='+0Hz' rate='-15%' volume='+0%'>" +
+      `<prosody pitch='+0Hz' rate='${rate}' volume='+0%'>` +
       escapeXml(text) +
       "</prosody></voice></speak>";
     await conn.write(makeTextFrame(

@@ -90,15 +90,19 @@ Deno.serve(async (req) => {
       // ----------------------------------------------------
       // FLUXO DE TEXTO CLÁSSICO
       // ----------------------------------------------------
-      const { messages, generateAudio, ttsText } = await req.json();
+      const { messages, generateAudio, ttsText, ttsRate } = await req.json();
 
       // TTS puro (botão de som dos exercícios): só sintetiza o texto recebido,
       // sem passar pelo agente de IA. Usa o edge-tts gratuito; se o serviço
       // não-oficial falhar e houver chave, cai no Azure TTS.
+      // ttsRate (opcional): ajuste de velocidade via SSML <prosody rate>, usado
+      // pelo seletor de velocidade do exercício "Leitura de Texto" — sintetizado
+      // já na velocidade certa (evita o efeito robótico de esticar o áudio no
+      // navegador via playbackRate). Sem ttsRate, mantém o -15% padrão de sempre.
       if (ttsText) {
         let audioBase64: string;
         try {
-          audioBase64 = encodeBase64(await edgeTtsSynthesize(cleanTextForSpeech(ttsText)));
+          audioBase64 = encodeBase64(await edgeTtsSynthesize(cleanTextForSpeech(ttsText), undefined, ttsRate));
         } catch (edgeError) {
           console.error("edge-tts falhou, tentando Azure:", (edgeError as Error).message);
           if (!apiKey) throw edgeError;

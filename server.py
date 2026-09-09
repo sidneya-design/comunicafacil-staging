@@ -123,10 +123,10 @@ def clean_text_for_tts(text):
 # O fluxo do chat com IA continua usando o Azure TTS oficial (synthesize_text) abaixo.
 EDGE_TTS_VOICE = "pt-BR-FranciscaNeural"
 
-def synthesize_text_edge(text):
+def synthesize_text_edge(text, rate=None):
     text = clean_text_for_tts(text)
     async def _run():
-        communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
+        communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE, rate=rate) if rate else edge_tts.Communicate(text, EDGE_TTS_VOICE)
         chunks = []
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
@@ -250,7 +250,7 @@ def chat():
             # o Azure fica reservado ao fluxo do chat com IA.
             tts_text = (data.get('ttsText') or '').strip()
             if tts_text:
-                return jsonify({"audio": synthesize_text_edge(tts_text)})
+                return jsonify({"audio": synthesize_text_edge(tts_text, data.get('ttsRate'))})
 
             messages = data.get('messages', [])
             generate_audio = data.get('generateAudio', False)
