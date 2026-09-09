@@ -3014,6 +3014,7 @@ async function loadExerciseCards() {
                         fromSupabase: true,
                         patientId: ex.patient_id || null,
                         doctorUserId: ex.doctor_user_id || null,
+                        companyId: ex.company_id || null,
                         forkedFrom: ex.forked_from || null,
                         gameKind: ex.game_kind || null,
                         syllablesSize: ex.syllables_size || null,
@@ -3294,6 +3295,17 @@ function renderExerciseCards(exercisesArray) {
                 const patientInfo = doctorPatientsCache.find(p => p.id === ex.patientId);
                 btn.appendChild(createNotifyUsersButton(displayTitle, 'Exercício', { id: ex.patientId, name: patientInfo?.name, email: patientInfo?.email }));
             }
+        } else if (isDoctor && !ex.doctorUserId && ex.companyId && ex.companyId === currentUserCompanyId && !ex.gameKind) {
+            // Exercício que o admin mandou direto pra empresa do médico: edita em
+            // cima do original (a RLS libera essa escrita pra qualquer médico da
+            // empresa) — sem fork, os colegas continuam vendo a mesma versão.
+            const editBtn = document.createElement('button');
+            editBtn.className = 'edit-media-btn'; editBtn.innerHTML = '<i class="fas fa-pencil-alt" aria-hidden="true"></i>'; editBtn.setAttribute('aria-label', 'Editar');
+            editBtn.onclick = (ev) => {
+                ev.stopPropagation();
+                openEditExercise(ex);
+            };
+            btn.appendChild(editBtn);
         } else if (isDoctor && !ex.doctorUserId && !ex.gameKind) {
             // Exercício global do admin: médico pode editar (a primeira edição
             // cria uma cópia própria — ver openEditExercise/getOrCreateExerciseFork —
@@ -4429,7 +4441,16 @@ function openEditExercise(ex) {
     // original de novo (senão perderia as edições já feitas na cópia).
     // Exercício escopado a um paciente (patientId) NÃO entra aqui — já é
     // dele/do médico responsável, edita direto, não forka.
-    if (isDoctor && !ex.doctorUserId && !ex.patientId) {
+    // Exceção: exercício que o admin mandou direto pra empresa do médico
+    // (company_id bate com a do médico) edita em cima do original — a RLS já
+    // libera essa escrita pra qualquer médico da empresa (ver migration
+    // company_shared_admin_content) — sem isso a cópia ficaria "solta" e os
+    // colegas de empresa continuariam vendo a versão antiga do admin.
+    if (isDoctor && !ex.doctorUserId && !ex.patientId && ex.companyId && ex.companyId === currentUserCompanyId) {
+        currentEditingExerciseId = ex.id;
+        currentEditingExerciseFromSupabase = true;
+        currentEditingExerciseForkSource = null;
+    } else if (isDoctor && !ex.doctorUserId && !ex.patientId) {
         const existingFork = lastMergedExercises.find(e => e.doctorUserId === currentUserId && e.forkedFrom === ex.id);
         if (existingFork) return openEditExercise(existingFork);
         currentEditingExerciseId = null;
