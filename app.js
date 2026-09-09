@@ -1942,10 +1942,13 @@ function prefetchTts(text) {
 
 // Velocidades do player de "Leitura de Texto": sintetizadas já na velocidade
 // certa via SSML <prosody rate> (edge-tts/edge_tts.ts) — não é o playbackRate
-// do <audio> esticando o som depois de pronto, que soa robótico/ruim,
-// principalmente mais devagar. "1" (padrão) não manda ttsRate nenhum: fica
-// idêntico à voz normal de sempre em todo o resto do app.
-const READING_TEXT_RATE_MAP = { '0.75': '-30%', '1': null, '1.25': '+15%', '1.5': '+35%' };
+// do <audio> esticando o som depois de pronto, que soa robótico/ruim.
+// Valores absolutos (não somam com o -15% padrão do resto do app) — "1x"
+// aqui é um pouco mais devagar que o padrão do app (-20% vs -15%), só
+// nesse player, pra ficar mais natural numa leitura mais longa. Faixa toda
+// mantida entre -25% e +5% pra evitar o efeito de fala "morta"/sem prosódia
+// que aparece em velocidades muito baixas (ex.: -30% soava mal).
+const READING_TEXT_RATE_MAP = { '0.75': '-25%', '1': '-20%', '1.25': '-10%', '1.5': '+5%' };
 
 // Função principal de áudio — usada em todo o app (cards, jogos, compositor).
 // Usa a voz neural FranciscaNeural via edge-tts com fallback para o navegador.
