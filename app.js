@@ -2559,7 +2559,7 @@ async function getOrCreateExerciseFork(sourceId, title, doctorUserId) {
     return forkId;
 }
 
-async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null) {
+async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null, companyId = null) {
     // Exercícios só-locais (ex.: os semeados por seedLocalPracticeExercises) têm um id
     // de IndexedDB, não um id do Supabase. Se tentássemos o caminho do Supabase pra eles,
     // o update/delete usaria esse id local contra a tabela real e não bateria com nada —
@@ -2586,7 +2586,12 @@ async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null) 
             }
 
             if (targetExerciseId) {
-                const { error: updateErr } = await supabaseClient.from('exercises').update({ title }).eq('id', targetExerciseId);
+                // company_id só entra na atualização quando é o admin salvando (o
+                // seletor "Enviar para empresa" é dele) — se um médico editasse e
+                // isso fosse incondicional, a cada save apagaria o company_id que o
+                // admin tinha setado (companyId chega null pro médico).
+                const updateFields = isAdmin ? { title, company_id: companyId } : { title };
+                const { error: updateErr } = await supabaseClient.from('exercises').update(updateFields).eq('id', targetExerciseId);
                 if (updateErr) throw updateErr;
                 const { error: deleteErr } = await supabaseClient.from('exercise_items').delete().eq('exercise_id', targetExerciseId);
                 if (deleteErr) throw deleteErr;
@@ -2602,7 +2607,7 @@ async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null) 
                 // ele liberar por paciente em "Meus Pacientes" — patient_exercise_flags).
                 const newExercisePayload = doctorUserId
                     ? { title, visible: true, doctor_user_id: doctorUserId, company_id: currentUserCompanyId }
-                    : { title, visible: false };
+                    : { title, visible: false, company_id: companyId };
                 const { data: exData, error: insertErr } = await supabaseClient.from('exercises').insert([newExercisePayload]).select().single();
                 if (insertErr) throw insertErr;
                 const dbItems = uploadedItems.map(item => ({
@@ -4475,6 +4480,12 @@ function openEditExercise(ex) {
     document.getElementById('exercise-title').value = displayTitle;
     document.getElementById('exercise-color').value = colorClass;
 
+    const companyGroup = document.getElementById('exercise-target-company-group');
+    if (companyGroup) {
+        companyGroup.style.display = isAdmin ? '' : 'none';
+        if (isAdmin) populateExerciseCompanySelect(ex.companyId || null);
+    }
+
     const container = document.getElementById('exercise-items-container');
     container.innerHTML = '';
 
@@ -5042,6 +5053,12 @@ function setupModals() {
         document.getElementById('upload-exercise-modal').querySelector('h2').textContent = "Novo Exercício (Slides)";
         document.getElementById('upload-exercise-form').reset();
 
+        const companyGroup = document.getElementById('exercise-target-company-group');
+        if (companyGroup) {
+            companyGroup.style.display = isAdmin ? '' : 'none';
+            if (isAdmin) populateExerciseCompanySelect(null);
+        }
+
         const container = document.getElementById('exercise-items-container');
         container.innerHTML = '';
         addExerciseBlock();
@@ -5214,7 +5231,8 @@ function setupModals() {
         });
 
         const targetDoctorUserId = isDoctor ? currentUserId : null;
-        saveExercisePlaylistToDB(finalTitle, itemsArray, targetDoctorUserId);
+        const targetCompanyId = isAdmin ? (document.getElementById('exercise-target-company')?.value || null) : null;
+        saveExercisePlaylistToDB(finalTitle, itemsArray, targetDoctorUserId, targetCompanyId);
         closeExerciseUpload();
     });
 
@@ -12503,6 +12521,24 @@ function populateCompanySelect() {
     select.innerHTML = companiesCache.map(c => `<option value="${c.id}">${c.name}</option>`).join('')
         || '<option value="">Nenhuma empresa cadastrada</option>';
     if (current && companiesCache.some(c => c.id === current)) select.value = current;
+}
+
+// Seletor "Enviar para empresa" no editor de exercício (Slides) — só pro admin,
+// só existe assim: exercício com company_id (sem doctor_user_id) fica editável
+// direto por qualquer médico daquela empresa (ver migration
+// company_doctors_edit_admin_exercises), em vez do fork de sempre.
+async function populateExerciseCompanySelect(selectedCompanyId) {
+    const select = document.getElementById('exercise-target-company');
+    if (!select) return;
+    if (!companiesCache.length) {
+        try {
+            const { companies } = await callAdminUsersFn('listCompanies');
+            companiesCache = companies || [];
+        } catch (e) {}
+    }
+    select.innerHTML = '<option value="">Nenhuma (global, todo mundo vê)</option>'
+        + companiesCache.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    select.value = selectedCompanyId || '';
 }
 
 const newCompanyModal = document.getElementById('new-company-modal');
