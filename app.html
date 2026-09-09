@@ -1763,11 +1763,20 @@
                 <button class="close-modal-btn" id="btn-close-reading-text-player" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
             </div>
             <p id="reading-text-player-body" style="font-size: 22px; line-height: 1.6; white-space: pre-wrap; padding: 10px 4px 24px;"></p>
-            <div class="modal-footer" style="justify-content: center;">
+            <div class="modal-footer" style="justify-content: center; gap: 12px; flex-wrap: wrap;">
                 <button type="button" class="btn-primary" id="btn-play-reading-text"
                     style="background: linear-gradient(135deg, #93c5fd 0%, #2563eb 100%); display: flex; align-items: center; gap: 10px;">
                     <i class="fas fa-volume-up" aria-hidden="true"></i> Ouvir leitura
                 </button>
+                <label for="reading-text-speed" style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #475569;">
+                    Velocidade
+                    <select id="reading-text-speed" style="height: 38px; border: 1px solid #ddd; border-radius: 8px; padding: 0 10px; background: white; cursor: pointer;">
+                        <option value="0.75">0.75x</option>
+                        <option value="1" selected>1x</option>
+                        <option value="1.25">1.25x</option>
+                        <option value="1.5">1.5x</option>
+                    </select>
+                </label>
             </div>
             <div id="reading-text-player-phrases" style="margin-top: 10px;"></div>
         </div>
