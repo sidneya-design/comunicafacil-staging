@@ -1739,6 +1739,13 @@
                     <label for="reading-text-content">Texto pra leitura</label>
                     <textarea id="reading-text-content" required rows="10" placeholder="Cole ou digite aqui o parágrafo que a pessoa vai ler..." style="width: 100%; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; padding: 12px; font-size: 16px; font-family: inherit; resize: vertical;"></textarea>
                 </div>
+                <div class="form-group">
+                    <label>Frases separadas (opcional — cada uma ganha o próprio botão de tocar)</label>
+                    <div id="reading-text-phrases-container"></div>
+                    <button type="button" class="btn-secondary" id="btn-add-reading-text-phrase" style="width: 100%;">
+                        <i class="fas fa-plus" aria-hidden="true"></i> Adicionar frase
+                    </button>
+                </div>
                 <div class="modal-footer">
                     <button type="button" class="btn-secondary" id="btn-cancel-reading-text-exercise">Cancelar</button>
                     <button type="submit" class="btn-primary"
@@ -1762,6 +1769,7 @@
                     <i class="fas fa-volume-up" aria-hidden="true"></i> Ouvir leitura
                 </button>
             </div>
+            <div id="reading-text-player-phrases" style="margin-top: 10px;"></div>
         </div>
     </div>
 

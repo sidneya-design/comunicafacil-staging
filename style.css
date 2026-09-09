@@ -344,6 +344,16 @@ body {
 .exercise-type-option.audio-real i { color: #0d9488; }
 .exercise-type-option.reading-text { border-color: #93c5fd; }
 .exercise-type-option.reading-text i { color: #2563eb; }
+
+.reading-text-phrase-block { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.reading-text-phrase-input { flex: 1; height: 40px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; padding: 0 12px; font-size: 15px; font-family: inherit; }
+.reading-text-phrase-block button { flex-shrink: 0; height: 40px; width: 40px; border: none; border-radius: 8px; cursor: pointer; color: white; }
+.reading-text-phrase-play { background: #2563eb; }
+.reading-text-phrase-remove { background: #ff4d4f; }
+
+.reading-text-player-phrase-row { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-top: 1px solid #eee; }
+.reading-text-player-phrase-row span { flex: 1; font-size: 17px; line-height: 1.4; }
+.reading-text-player-phrase-row button { flex-shrink: 0; height: 36px; width: 36px; border: none; border-radius: 8px; background: #2563eb; color: white; cursor: pointer; }
 @media (max-width: 600px) {
     .exercise-type-grid { grid-template-columns: 1fr; }
     .exercise-type-option { min-height: 145px; }

@@ -2775,16 +2775,44 @@ async function saveAudioExerciseToDB(title, size, color, font, itemsArray, docto
     }
 }
 
-// Exercício de Leitura de Texto: o mais simples dos tipos de exercício — só
-// título e um parágrafo, guardado como um único exercise_items.word (sem
-// sílabas/imagem/áudio próprio). Tocar o texto reaproveita speakWithAzure,
-// o mesmo TTS usado no resto do app — sem destaque palavra-a-palavra
-// sincronizado com o áudio (fica pra uma fase futura, ver conversa sobre
-// edge-tts WordBoundary).
+// Exercício de Leitura de Texto: título + um parágrafo principal (sempre
+// exercise_items[0].word), mais uma lista opcional de frases separadas
+// (exercise_items[1..]), cada uma com o próprio botão de tocar — pra
+// praticar frase a frase, não só o texto inteiro de uma vez. Tocar
+// reaproveita speakWithAzure, o mesmo TTS usado no resto do app — sem
+// destaque palavra-a-palavra sincronizado com o áudio (fica pra uma fase
+// futura, ver conversa sobre edge-tts WordBoundary).
 let currentEditingReadingTextExerciseId = null;
 let currentEditingReadingTextExerciseFromSupabase = false;
+let readingTextPhraseBlockCounter = 0;
 
-async function saveReadingTextExerciseToDB(title, text, doctorUserId = null, companyId = null) {
+function createReadingTextPhraseBlockHtml(blockId) {
+    return `
+        <div class="reading-text-phrase-block" data-block-id="${blockId}">
+            <input type="text" class="reading-text-phrase-input" placeholder="Ex: O gato subiu no telhado.">
+            <button type="button" class="reading-text-phrase-play" title="Ouvir esta frase"><i class="fas fa-volume-up" aria-hidden="true"></i></button>
+            <button type="button" class="reading-text-phrase-remove" title="Remover"><i class="fas fa-trash" aria-hidden="true"></i></button>
+        </div>
+    `;
+}
+
+function addReadingTextPhraseBlock(value = '') {
+    const container = document.getElementById('reading-text-phrases-container');
+    if (!container) return;
+    const blockId = readingTextPhraseBlockCounter++;
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = createReadingTextPhraseBlockHtml(blockId);
+    const blockEl = wrapper.firstElementChild;
+    blockEl.querySelector('.reading-text-phrase-input').value = value;
+    blockEl.querySelector('.reading-text-phrase-remove').addEventListener('click', () => container.removeChild(blockEl));
+    blockEl.querySelector('.reading-text-phrase-play').addEventListener('click', () => {
+        const text = blockEl.querySelector('.reading-text-phrase-input').value.trim();
+        if (text) speakWithAzure(text);
+    });
+    container.appendChild(blockEl);
+}
+
+async function saveReadingTextExerciseToDB(title, text, phrases = [], doctorUserId = null, companyId = null) {
     const shouldTrySupabase = supabaseClient && (!currentEditingReadingTextExerciseId || currentEditingReadingTextExerciseFromSupabase);
     if (shouldTrySupabase) {
         try {
@@ -2808,7 +2836,8 @@ async function saveReadingTextExerciseToDB(title, text, doctorUserId = null, com
                 targetExerciseId = exData.id;
             }
 
-            const { error: itemsErr } = await supabaseClient.from('exercise_items').insert([{ exercise_id: targetExerciseId, word: text, link: '' }]);
+            const dbItems = [text, ...phrases].map(word => ({ exercise_id: targetExerciseId, word, link: '' }));
+            const { error: itemsErr } = await supabaseClient.from('exercise_items').insert(dbItems);
             if (itemsErr) throw itemsErr;
 
             loadExerciseCards();
@@ -2819,7 +2848,7 @@ async function saveReadingTextExerciseToDB(title, text, doctorUserId = null, com
         }
     }
 
-    const localPayload = { title, items: [{ word: text }], visible: false, gameKind: 'reading-text' };
+    const localPayload = { title, items: [text, ...phrases].map(word => ({ word })), visible: false, gameKind: 'reading-text' };
     if (currentEditingReadingTextExerciseId) {
         db.transaction(['exercises'], 'readonly').objectStore('exercises').get(currentEditingReadingTextExerciseId).onsuccess = (e) => {
             const existing = e.target.result || {};
@@ -2849,6 +2878,13 @@ function openEditReadingTextExercise(ex) {
     document.getElementById('reading-text-exercise-color').value = colorClass;
     document.getElementById('reading-text-content').value = (ex.items && ex.items[0] && ex.items[0].word) || '';
 
+    const phrasesContainer = document.getElementById('reading-text-phrases-container');
+    if (phrasesContainer) {
+        phrasesContainer.innerHTML = '';
+        readingTextPhraseBlockCounter = 0;
+        (ex.items || []).slice(1).forEach(item => addReadingTextPhraseBlock(item.word || ''));
+    }
+
     const companyGroup = document.getElementById('reading-text-exercise-target-company-group');
     if (companyGroup) {
         companyGroup.style.display = isAdmin ? '' : 'none';
@@ -2859,12 +2895,37 @@ function openEditReadingTextExercise(ex) {
 function openReadingTextPlayer(ex) {
     const displayTitle = (ex.title || '').split('|')[0] || ex.title || 'Exercício';
     const text = (ex.items && ex.items[0] && ex.items[0].word) || '';
+    const phrases = (ex.items || []).slice(1).map(item => item.word).filter(Boolean);
 
     document.getElementById('reading-text-player-modal').style.display = 'flex';
     document.getElementById('reading-text-player-title').textContent = displayTitle;
     const bodyEl = document.getElementById('reading-text-player-body');
     bodyEl.textContent = text;
     bodyEl.dataset.text = text;
+
+    const phrasesEl = document.getElementById('reading-text-player-phrases');
+    phrasesEl.innerHTML = '';
+    phrases.forEach(phrase => {
+        const row = document.createElement('div');
+        row.className = 'reading-text-player-phrase-row';
+        const span = document.createElement('span');
+        span.textContent = phrase;
+        const playBtn = document.createElement('button');
+        playBtn.type = 'button';
+        playBtn.title = 'Ouvir esta frase';
+        playBtn.innerHTML = '<i class="fas fa-volume-up" aria-hidden="true"></i>';
+        playBtn.addEventListener('click', () => {
+            trackUsageActivity(displayTitle, {
+                key: `exercise:speak:${displayTitle}`,
+                group: 'Exercícios',
+                detail: 'Ouviu frase: ' + phrase
+            });
+            speakWithAzure(phrase);
+        });
+        row.appendChild(span);
+        row.appendChild(playBtn);
+        phrasesEl.appendChild(row);
+    });
 
     startUsageActivity(displayTitle, {
         key: `exercise:${ex.id || displayTitle}`,
@@ -5531,6 +5592,8 @@ function setupModals() {
         document.getElementById('reading-text-exercise-modal').style.display = 'flex';
         document.getElementById('reading-text-exercise-modal').querySelector('h2').textContent = "Novo Exercício (Leitura de Texto)";
         document.getElementById('reading-text-exercise-form').reset();
+        document.getElementById('reading-text-phrases-container').innerHTML = '';
+        readingTextPhraseBlockCounter = 0;
 
         const readingTextCompanyGroup = document.getElementById('reading-text-exercise-target-company-group');
         if (readingTextCompanyGroup) {
@@ -5540,7 +5603,15 @@ function setupModals() {
     };
     document.getElementById('btn-create-reading-text-exercise').addEventListener('click', openReadingTextExerciseCreator);
 
-    const closeReadingTextExerciseUpload = () => { document.getElementById('reading-text-exercise-modal').style.display = 'none'; document.getElementById('reading-text-exercise-form').reset(); };
+    document.getElementById('btn-add-reading-text-phrase').addEventListener('click', () => {
+        addReadingTextPhraseBlock();
+    });
+
+    const closeReadingTextExerciseUpload = () => {
+        document.getElementById('reading-text-exercise-modal').style.display = 'none';
+        document.getElementById('reading-text-exercise-form').reset();
+        document.getElementById('reading-text-phrases-container').innerHTML = '';
+    };
     document.getElementById('btn-close-reading-text-exercise').addEventListener('click', closeReadingTextExerciseUpload);
     document.getElementById('btn-cancel-reading-text-exercise').addEventListener('click', closeReadingTextExerciseUpload);
 
@@ -5555,10 +5626,13 @@ function setupModals() {
         const finalTitle = `${titleVal}|${colorVal}`;
         const textVal = document.getElementById('reading-text-content').value.trim();
         if (!textVal) return alert("Escreva o texto que a pessoa vai ler.");
+        const phrasesVal = Array.from(document.querySelectorAll('.reading-text-phrase-input'))
+            .map(input => input.value.trim())
+            .filter(Boolean);
 
         const targetDoctorUserId = isDoctor ? currentUserId : null;
         const targetCompanyId = isAdmin ? (document.getElementById('reading-text-exercise-target-company')?.value || null) : null;
-        saveReadingTextExerciseToDB(finalTitle, textVal, targetDoctorUserId, targetCompanyId);
+        saveReadingTextExerciseToDB(finalTitle, textVal, phrasesVal, targetDoctorUserId, targetCompanyId);
         closeReadingTextExerciseUpload();
     });
 
