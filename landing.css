@@ -603,6 +603,19 @@
             object-fit: contain;
             z-index: 2;
             filter: drop-shadow(-15px 25px 35px rgba(0, 0, 0, 0.4));
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .preview-mockup .macbook-mockup {
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .preview-mockup:hover .macbook-mockup {
+            transform: scale(1.02);
+        }
+
+        .preview-mockup:hover .img-cel {
+            transform: scale(1.05);
         }
 
         .floating-badge {
@@ -639,6 +652,14 @@
 
         @media (prefers-reduced-motion: reduce) {
             .floating-badge { animation: none; }
+        }
+
+        .interface-preview .macbook-mockup--wide {
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .interface-preview:hover .macbook-mockup--wide {
+            transform: scale(1.02);
         }
 
         .interface-preview {
@@ -984,6 +1005,10 @@
         @media (prefers-reduced-motion: reduce) {
             .orb { animation: none; }
             .fade-up { animation: none; opacity: 1; transform: none; }
+            .preview-mockup .macbook-mockup,
+            .img-cel {
+                animation: none;
+            }
         }
 
         /* Responsividade */
