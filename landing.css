@@ -514,6 +514,177 @@
         .tile.orange { background: linear-gradient(135deg, #ff9f43, #ff6b6b); box-shadow: 0 4px 12px rgba(255, 159, 67, 0.25); }
         .tile.red { background: linear-gradient(135deg, #ff4d4d, #c026d3); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25); }
 
+        /* Mockups (Notebook e Celular) */
+        .preview-mockup {
+            position: relative;
+            display: flex;
+            align-items: flex-end;
+            justify-content: flex-end;
+            width: 100%;
+            height: auto;
+            min-height: 340px;
+            margin: 0 auto;
+            overflow: visible;
+            transform: scale(1.55);
+            transform-origin: right bottom;
+        }
+
+        .macbook-mockup {
+            position: relative;
+            width: 100%;
+            max-width: 680px;
+            z-index: 1;
+            margin-right: 4%;
+            margin-bottom: 20px;
+        }
+
+        .macbook-mockup--wide {
+            width: 100%;
+            max-width: none;
+            margin-right: 0;
+            margin-bottom: 0;
+        }
+
+        .macbook-screen {
+            background: #111;
+            border-radius: 12px 12px 0 0;
+            padding: 2% 2% 3%;
+            position: relative;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            overflow: hidden;
+        }
+
+        .macbook-screen img {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 2px;
+        }
+
+        .macbook-webcam {
+            position: absolute;
+            top: 1%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 4px;
+            height: 4px;
+            background: #333;
+            border-radius: 50%;
+            border: 1px solid #000;
+        }
+
+        .macbook-base {
+            background: linear-gradient(to bottom, #777, #444);
+            height: 16px;
+            border-radius: 0 0 12px 12px;
+            position: relative;
+            margin: 0 -3%;
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.3), 0 10px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .macbook-base-notch {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 14%;
+            height: 4px;
+            background: #333;
+            border-radius: 0 0 4px 4px;
+        }
+
+        .img-cel {
+            position: absolute;
+            right: -3%;
+            bottom: -8%;
+            width: 24%;
+            max-width: 140px;
+            height: auto;
+            object-fit: contain;
+            z-index: 2;
+            filter: drop-shadow(-15px 25px 35px rgba(0, 0, 0, 0.4));
+        }
+
+        .floating-badge {
+            position: absolute;
+            top: -2%;
+            right: 1%;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 20px;
+            border-radius: 999px;
+            background: var(--card-strong);
+            border: 1px solid var(--stroke);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            box-shadow: var(--shadow-md);
+            font-weight: 700;
+            font-size: 0.85rem;
+            color: #0f172a;
+            z-index: 3;
+            white-space: nowrap;
+            animation: float-badge 4s ease-in-out infinite;
+        }
+
+        .floating-badge i {
+            color: var(--accent);
+            font-size: 1rem;
+        }
+
+        @keyframes float-badge {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .floating-badge { animation: none; }
+        }
+
+        .interface-preview {
+            max-width: 800px;
+            margin: 0 auto 100px;
+            padding: 0 20px;
+        }
+
+        .section-title--tight {
+            margin-top: 60px;
+        }
+
+        .section-title--tight2 {
+            margin-top: 40px;
+        }
+
+        .media-gallery {
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+            justify-content: center;
+            max-width: 1100px;
+            margin: 0 auto 100px;
+            padding: 0 20px;
+        }
+
+        .media-card {
+            flex: 0 1 260px;
+            aspect-ratio: 9 / 16;
+            border-radius: 32px;
+            overflow: hidden;
+            box-shadow: var(--shadow-lg);
+            border: 1px solid var(--stroke);
+            background: rgba(255, 255, 255, 0.45);
+            backdrop-filter: blur(20px);
+        }
+
+        .media-card video,
+        .media-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            border-radius: 32px;
+        }
+
         /* Títulos de Seção */
         .section-title {
             margin: 100px 0 40px;
@@ -539,7 +710,7 @@
             color: var(--accent-2);
         }
 
-        .section-title h3 {
+        .section-title h2 {
             font-size: clamp(1.8rem, 3.5vw, 2.5rem);
             letter-spacing: -0.03em;
             font-weight: 800;
@@ -849,6 +1020,12 @@
 
             .preview-card {
                 transform: none !important;
+            }
+
+            .preview-mockup {
+                transform: scale(1);
+                max-width: 500px;
+                margin: 0 auto;
             }
 
             .feature-grid,
