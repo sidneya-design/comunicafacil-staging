@@ -4734,3 +4734,21 @@ button, .action-btn { touch-action: manipulation; }
 .jogo2-roll-label i {
     font-size: 0.9em;
 }
+
+/* Evolução do paciente (Monte a Frase) */
+.evolution-modal-content { box-sizing: border-box; max-width: 860px; width: min(94vw, 860px); max-height: 90vh; overflow-y: auto; }
+.evolution-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 1rem; }
+.evolution-summary div { background: #f4f6f8; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.evolution-summary strong { font-size: 1.35rem; color: #1f2933; }
+.evolution-summary span { font-size: 0.85rem; color: #52514e; }
+.evolution-section-title { font-size: 1rem; margin: 1.1rem 0 0.5rem; color: #1f2933; }
+.evolution-chart { position: relative; height: 260px; }
+.evolution-table-wrap { overflow-x: auto; }
+.evolution-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.evolution-table th, .evolution-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e3e6ea; }
+.evolution-table th { color: #52514e; font-weight: 600; }
+.evolution-table td:not(:first-child), .evolution-table th:not(:first-child) { text-align: right; white-space: nowrap; }
+@media (max-width: 640px) {
+    .evolution-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .evolution-chart { height: 220px; }
+}

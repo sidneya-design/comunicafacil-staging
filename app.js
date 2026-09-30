@@ -13424,6 +13424,15 @@ async function loadAdminUsers() {
             passBtn.addEventListener('click', () => openChangePasswordModal(u.id, u.email));
             actionsCell.appendChild(passBtn);
 
+            if (u.role === 'patient') {
+                const evolutionBtn = document.createElement('button');
+                evolutionBtn.className = 'admin-edit-password-btn';
+                evolutionBtn.innerHTML = '<i class="fas fa-chart-line" aria-hidden="true"></i>';
+                evolutionBtn.title = 'Evolução do paciente no Monte a Frase';
+                evolutionBtn.addEventListener('click', () => openPatientEvolutionModal(u.id, u.name || u.email));
+                actionsCell.appendChild(evolutionBtn);
+            }
+
             if (u.role === 'doctor') {
                 const activityBtn = document.createElement('button');
                 activityBtn.className = 'admin-edit-password-btn';
@@ -14083,7 +14092,13 @@ async function loadDoctorPatients() {
             btnViewAudios.className = 'admin-edit-password-btn';
             btnViewAudios.addEventListener('click', () => enterPatientContext(p, 'view-audio'));
 
-            tdActions.append(btnPassword, btnModules, btnExercises, btnViewExercises, btnTopics, btnVirtues, btnCarometro, btnCarometroGlobal, btnBooks, btnReleaseBooks, btnMedias, btnViewMedias, btnAudios, btnViewAudios, btnToggleActive);
+            const btnEvolution = document.createElement('button');
+            btnEvolution.innerHTML = '<i class="fas fa-chart-line" aria-hidden="true"></i>';
+            btnEvolution.title = 'Evolução do paciente no Monte a Frase';
+            btnEvolution.className = 'admin-edit-password-btn';
+            btnEvolution.addEventListener('click', () => openPatientEvolutionModal(p.userId, p.name || p.email));
+
+            tdActions.append(btnPassword, btnEvolution, btnModules, btnExercises, btnViewExercises, btnTopics, btnVirtues, btnCarometro, btnCarometroGlobal, btnBooks, btnReleaseBooks, btnMedias, btnViewMedias, btnAudios, btnViewAudios, btnToggleActive);
             tr.append(tdName, tdEmail, tdStatus, tdCreated, tdLastSignIn, tdActions);
             tbody.appendChild(tr);
         });
@@ -14756,6 +14771,214 @@ document.getElementById('btn-close-patient-carometro')?.addEventListener('click'
 
 document.getElementById('btn-close-patient-exercises')?.addEventListener('click', () => {
     if (patientExercisesModal) patientExercisesModal.style.display = 'none';
+});
+
+// =============================================
+// EVOLUÇÃO DO PACIENTE (activity_results)
+// Cada frase montada no Monte a Frase grava movimentos, pistas e segundos
+// (monte-frase.js → logResult). Aqui o médico (ou o admin) vê isso agrupado
+// por sessão — cada vez que o paciente abriu o exercício — num gráfico de
+// médias por frase, na lista de sessões e nas frases com mais dificuldade.
+// A RLS já limita a leitura aos pacientes do médico / da clínica.
+// =============================================
+const patientEvolutionModal = document.getElementById('patient-evolution-modal');
+let patientEvolutionChart = null;
+
+function formatEvolutionDuration(totalSeconds) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return minutes ? `${minutes} min ${String(seconds).padStart(2, '0')} s` : `${seconds} s`;
+}
+
+function formatEvolutionAverage(value) {
+    return value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+function groupEvolutionSessions(rows) {
+    const bySession = new Map();
+    rows.forEach(row => {
+        if (!bySession.has(row.session_id)) bySession.set(row.session_id, { startedAt: row.created_at, items: [] });
+        bySession.get(row.session_id).items.push(row);
+    });
+    return [...bySession.values()].map(session => {
+        const count = session.items.length;
+        const moves = session.items.reduce((sum, item) => sum + item.moves, 0);
+        const hints = session.items.reduce((sum, item) => sum + item.hints, 0);
+        const seconds = session.items.reduce((sum, item) => sum + item.seconds, 0);
+        return { startedAt: session.startedAt, count, moves, hints, seconds, movesAvg: moves / count, hintsAvg: hints / count };
+    });
+}
+
+function evolutionTable(headers, rows) {
+    const table = document.createElement('table');
+    table.className = 'evolution-table';
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    headers.forEach(text => {
+        const th = document.createElement('th');
+        th.textContent = text;
+        headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    const tbody = document.createElement('tbody');
+    rows.forEach(values => {
+        const tr = document.createElement('tr');
+        values.forEach(value => {
+            const td = document.createElement('td');
+            td.textContent = value;
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+    table.append(thead, tbody);
+    const wrap = document.createElement('div');
+    wrap.className = 'evolution-table-wrap';
+    wrap.appendChild(table);
+    return wrap;
+}
+
+function renderEvolutionChart(canvas, sessions) {
+    if (patientEvolutionChart) patientEvolutionChart.destroy();
+    patientEvolutionChart = null;
+    if (typeof Chart === 'undefined') return;
+    const labels = sessions.map(session => new Date(session.startedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }));
+    const series = (label, color, data) => ({
+        label, data, borderColor: color, backgroundColor: color,
+        borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0, fill: false
+    });
+    patientEvolutionChart = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                series('Movimentos por frase', '#2a78d6', sessions.map(session => Number(session.movesAvg.toFixed(1)))),
+                series('Pistas por frase', '#eb6834', sessions.map(session => Number(session.hintsAvg.toFixed(1))))
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { position: 'top', align: 'start', labels: { color: '#52514e', usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8 } },
+                tooltip: {
+                    callbacks: {
+                        title: items => `Sessão de ${new Date(sessions[items[0].dataIndex].startedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`,
+                        label: item => `${item.dataset.label}: ${formatEvolutionAverage(item.parsed.y)}`,
+                        afterBody: items => `Frases montadas: ${sessions[items[0].dataIndex].count}`
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { color: '#52514e' } },
+                y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.06)' }, ticks: { color: '#52514e', precision: 0 },
+                    title: { display: true, text: 'média por frase', color: '#52514e' } }
+            }
+        }
+    });
+}
+
+async function openPatientEvolutionModal(patientUserId, patientName) {
+    document.getElementById('patient-evolution-subtitle').textContent = patientName || '';
+    const body = document.getElementById('patient-evolution-body');
+    body.textContent = 'Carregando...';
+    if (patientEvolutionModal) patientEvolutionModal.style.display = 'flex';
+
+    const { data: rows, error } = await supabaseClient
+        .from('activity_results')
+        .select('created_at, session_id, item_text, moves, hints, seconds')
+        .eq('user_id', patientUserId)
+        .eq('activity', 'monte-frase')
+        .order('created_at', { ascending: true })
+        .limit(5000);
+    body.innerHTML = '';
+    if (error) {
+        body.textContent = 'Não consegui carregar a evolução: ' + error.message;
+        return;
+    }
+    if (!rows || !rows.length) {
+        const empty = document.createElement('p');
+        empty.className = 'media-hint';
+        empty.textContent = 'Ainda não há registros. Os resultados aparecem depois que o paciente montar frases no Monte a Frase.';
+        body.appendChild(empty);
+        return;
+    }
+
+    const sessions = groupEvolutionSessions(rows);
+    const totalSeconds = rows.reduce((sum, row) => sum + row.seconds, 0);
+
+    const summary = document.createElement('div');
+    summary.className = 'evolution-summary';
+    [
+        [sessions.length, sessions.length === 1 ? 'sessão' : 'sessões'],
+        [rows.length, 'frases montadas'],
+        [formatEvolutionAverage(rows.reduce((sum, row) => sum + row.moves, 0) / rows.length), 'movimentos por frase'],
+        [formatEvolutionDuration(totalSeconds), 'tempo total']
+    ].forEach(([value, label]) => {
+        const tile = document.createElement('div');
+        const strong = document.createElement('strong');
+        strong.textContent = value;
+        const span = document.createElement('span');
+        span.textContent = label;
+        tile.append(strong, span);
+        summary.appendChild(tile);
+    });
+    body.appendChild(summary);
+
+    const chartTitle = document.createElement('h3');
+    chartTitle.className = 'evolution-section-title';
+    chartTitle.textContent = 'Média por frase em cada sessão (quanto menor, melhor)';
+    const chartWrap = document.createElement('div');
+    chartWrap.className = 'evolution-chart';
+    const canvas = document.createElement('canvas');
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', 'Gráfico da média de movimentos e de pistas por frase em cada sessão; os mesmos números estão na tabela de sessões abaixo.');
+    chartWrap.appendChild(canvas);
+    body.append(chartTitle, chartWrap);
+    renderEvolutionChart(canvas, sessions);
+
+    const sessionsTitle = document.createElement('h3');
+    sessionsTitle.className = 'evolution-section-title';
+    sessionsTitle.textContent = 'Sessões';
+    body.appendChild(sessionsTitle);
+    body.appendChild(evolutionTable(
+        ['Data', 'Frases', 'Movimentos por frase', 'Pistas por frase', 'Tempo'],
+        [...sessions].reverse().map(session => [
+            new Date(session.startedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+            session.count,
+            formatEvolutionAverage(session.movesAvg),
+            formatEvolutionAverage(session.hintsAvg),
+            formatEvolutionDuration(session.seconds)
+        ])
+    ));
+
+    // Frases com mais dificuldade: média de movimentos por frase, entre as
+    // que o paciente já montou; as 8 piores.
+    const byText = new Map();
+    rows.forEach(row => {
+        const entry = byText.get(row.item_text) || { attempts: 0, moves: 0, hints: 0 };
+        entry.attempts += 1;
+        entry.moves += row.moves;
+        entry.hints += row.hints;
+        byText.set(row.item_text, entry);
+    });
+    const hardest = [...byText.entries()]
+        .map(([text, entry]) => ({ text, attempts: entry.attempts, movesAvg: entry.moves / entry.attempts, hintsAvg: entry.hints / entry.attempts }))
+        .sort((a, b) => (b.movesAvg + b.hintsAvg * 2) - (a.movesAvg + a.hintsAvg * 2))
+        .slice(0, 8);
+    const hardestTitle = document.createElement('h3');
+    hardestTitle.className = 'evolution-section-title';
+    hardestTitle.textContent = 'Frases com mais dificuldade';
+    body.appendChild(hardestTitle);
+    body.appendChild(evolutionTable(
+        ['Frase', 'Vezes', 'Movimentos (média)', 'Pistas (média)'],
+        hardest.map(item => [item.text, item.attempts, formatEvolutionAverage(item.movesAvg), formatEvolutionAverage(item.hintsAvg)])
+    ));
+}
+
+document.getElementById('btn-close-patient-evolution')?.addEventListener('click', () => {
+    if (patientEvolutionModal) patientEvolutionModal.style.display = 'none';
+    if (patientEvolutionChart) { patientEvolutionChart.destroy(); patientEvolutionChart = null; }
 });
 
 // Monta a URL do iframe de Livros: propaga ?sb=staging (senão o iframe

@@ -55,7 +55,7 @@ const CARD_ROLE = "monte-frase-card";
 const CONFIG_ROLE = "monte-frase-config";
 const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
-const access = { remote: false, role: null, userId: null, companyId: null, canManage: false, blocked: null, containerId: null, configItemId: null };
+const access = { remote: false, role: null, userId: null, companyId: null, patientId: null, canManage: false, blocked: null, containerId: null, configItemId: null };
 let supabase = null;
 let custom = { onlyCustom: false, sentences: [] };
 // Frases de base, que entram antes das da clínica: as 10 prontas deste
@@ -178,7 +178,8 @@ async function initAccess() {
         // (ao liberar o Monte a Frase, o app libera junto o banco do admin).
         // Frases da clínica (ou do banco só do médico, se ele não tem empresa)
         // entram sobre a base: as do admin, se liberadas, senão as prontas.
-        const { data: patientRow } = await supabase.from("patients").select("doctor_user_id, company_id").eq("user_id", access.userId).maybeSingle();
+        const { data: patientRow } = await supabase.from("patients").select("id, doctor_user_id, company_id").eq("user_id", access.userId).maybeSingle();
+        access.patientId = patientRow?.id || null;
         const keys = [];
         if (patientRow?.company_id) keys.push(companyScopedSeedKey(patientRow.company_id));
         if (patientRow?.doctor_user_id) keys.push(doctorScopedSeedKey(patientRow.doctor_user_id));
@@ -625,12 +626,28 @@ function saveStat() {
 // (pode ser uma das alternativas), não necessariamente a cadastrada.
 function modelText() { return state.shownText || currentExercise().text; }
 
+// Evolução do paciente: cada frase montada vira uma linha em activity_results
+// (movimentos, pistas e segundos daquela frase, na sessão atual). Só grava
+// jogada de paciente logado; médico/admin testando e a demonstração local não
+// entram. Falha de rede não atrapalha o exercício.
+function logResult(item) {
+    if (!supabase || !access.remote || access.role !== "patient" || !access.patientId) return;
+    const seconds = Math.max(0, Math.round((Date.now() - (state.roundStartedAt || Date.now())) / 1000));
+    supabase.from("activity_results").insert([{
+        patient_id: access.patientId, activity: GAME_ID, session_id: state.sessionId,
+        item_text: item.text, moves: state.errors, hints: state.hintLevel, seconds
+    }]).then(({ error }) => {
+        if (error) console.warn("Monte a Frase: não consegui registrar o resultado:", error);
+    });
+}
+
 function finishAssembly() {
     const item = currentExercise();
     const placed = tiles().map(element => element.dataset.word);
     state.shownText = [item.text, ...(item.alt || [])].find(text => matchesAnOrder(placed, [sentenceWords(text)])) || item.text;
     state.completed = true;
     saveStat();
+    logResult(item);
     // Sem "Muito bem!" antes: repetido a cada frase, ficava cansativo. A voz
     // só lê a frase montada.
     showFinalSentence("A frase está montada.");
@@ -719,6 +736,7 @@ function renderExercise() {
         showSolved(previous);
         return;
     }
+    state.roundStartedAt = Date.now();
     getTtsAudio(item.text).catch(() => { /* o clique usa a voz nativa se precisar */ });
 }
 
@@ -800,6 +818,7 @@ function startLevel() {
     stopAudio();
     closeSpeechPanel();
     Object.assign(state, { level: 1, round: 0, stats: [] });
+    state.sessionId = window.crypto?.randomUUID?.() || `sessao-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     shuffleSentences();
     startTimer();
     renderExercise();
