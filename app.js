@@ -16293,7 +16293,9 @@ const isLocalhost = window.location.hostname === 'localhost' ||
                     window.location.hostname === '127.0.0.1' || 
                     window.location.protocol === 'file:';
 
-const SUPABASE_CHAT_ENDPOINT = "https://rrubmvykindvilptjhma.supabase.co/functions/v1/chat";
+// Função do projeto em uso (produção, ou staging no site de homologação): o
+// token de login só vale no projeto que o emitiu.
+const SUPABASE_CHAT_ENDPOINT = `${supabaseUrl}/functions/v1/chat`;
 
 const AZURE_AI_ENDPOINT = isLocalhost
     ? "http://127.0.0.1:5001/chat"

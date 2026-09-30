@@ -355,11 +355,12 @@ function shuffleForDisplay(items, orders) {
 }
 
 // ── Voz ───────────────────────────────────────────────────────────────────
-// Mesma voz neural do resto do app (edge-tts via /chat), com o mesmo fallback
-// de complete-frase.js. Cache só em memória: o cache de TTS em localStorage já
-// lotou a quota e derrubou o login uma vez.
+// Mesma voz neural do resto do app (edge-tts da função "chat"). A função exige
+// login, então vai por supabase.functions.invoke — que manda o token da sessão
+// e usa o projeto certo (produção ou staging); um fetch sem cabeçalho levava
+// 401 e caía na voz do navegador. Cache só em memória: o cache de TTS em
+// localStorage já lotou a quota e derrubou o login uma vez.
 const LOCAL_API = "http://127.0.0.1:5001";
-const SUPABASE_TTS_ENDPOINT = "https://rrubmvykindvilptjhma.supabase.co/functions/v1/chat";
 const ttsCache = new Map();
 let currentAudio = null;
 let slowModel = false;
@@ -375,13 +376,20 @@ async function fetchTtsAudio(endpoint, text) {
     return data.audio;
 }
 
+async function fetchSupabaseTtsAudio(text) {
+    if (!supabase) throw new Error("Supabase indisponível");
+    const { data, error } = await supabase.functions.invoke("chat", { body: { ttsText: text } });
+    if (error || !data?.audio) throw error || new Error(data?.error || "Resposta sem áudio");
+    return data.audio;
+}
+
 function getTtsAudio(text) {
     if (ttsCache.has(text)) return ttsCache.get(text);
     const promise = (async () => {
         if (isLocalhost) {
             try { return await fetchTtsAudio(`${LOCAL_API}/chat`, text); } catch (localError) { /* cai pro Supabase */ }
         }
-        return fetchTtsAudio(SUPABASE_TTS_ENDPOINT, text);
+        return fetchSupabaseTtsAudio(text);
     })();
     promise.catch(() => ttsCache.delete(text));
     ttsCache.set(text, promise);

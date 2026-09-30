@@ -239,7 +239,6 @@ async function loadRemoteCustomQuestions() {
     }
 }
 
-const SUPABASE_TTS_ENDPOINT = "https://rrubmvykindvilptjhma.supabase.co/functions/v1/chat";
 const LOCAL_TTS_ENDPOINT = "http://127.0.0.1:5001/chat";
 const TTS_STORAGE_PREFIX = "comunica_tts_v1:";
 const ttsCache = new Map();
@@ -284,6 +283,15 @@ async function fetchTtsAudio(endpoint, text) {
     return data.audio;
 }
 
+// A função "chat" exige login: supabase.functions.invoke manda o token da
+// sessão e usa o projeto certo (produção ou staging). O fetch sem cabeçalho
+// que existia aqui levava 401 e caía sempre na voz do navegador.
+async function fetchSupabaseTtsAudio(text) {
+    const { data, error } = await supabase.functions.invoke("chat", { body: { ttsText: speechText(text) } });
+    if (error || !data?.audio) throw error || new Error(data?.error || "Resposta sem áudio");
+    return data.audio;
+}
+
 function getTtsAudio(text) {
     const normalizedText = speechText(text);
     if (ttsCache.has(normalizedText)) return ttsCache.get(normalizedText);
@@ -298,10 +306,10 @@ function getTtsAudio(text) {
             try {
                 audioBase64 = await fetchTtsAudio(LOCAL_TTS_ENDPOINT, normalizedText);
             } catch (localError) {
-                audioBase64 = await fetchTtsAudio(SUPABASE_TTS_ENDPOINT, normalizedText);
+                audioBase64 = await fetchSupabaseTtsAudio(normalizedText);
             }
         } else {
-            audioBase64 = await fetchTtsAudio(SUPABASE_TTS_ENDPOINT, normalizedText);
+            audioBase64 = await fetchSupabaseTtsAudio(normalizedText);
         }
         try {
             localStorage.setItem(TTS_STORAGE_PREFIX + normalizedText, audioBase64);
