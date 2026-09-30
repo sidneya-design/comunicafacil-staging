@@ -425,6 +425,10 @@ function updateCounters() {
     document.getElementById("board-score").textContent = score;
     document.getElementById("board-position").textContent = `${state.round + 1} de ${total}`;
     document.getElementById("board-prev").disabled = state.round === 0;
+    // Só avança depois de montar a frase.
+    const next = document.getElementById("board-next");
+    next.disabled = !state.completed;
+    next.title = state.completed ? "Próxima frase" : "Monte a frase para avançar";
 }
 
 // ── Modo quadro: reordenar no próprio lugar ───────────────────────────────
@@ -579,7 +583,7 @@ function lockBoardPrefix(count) {
 
 function saveStat() {
     state.stats[state.round] = {
-        text: currentExercise().text, errors: state.errors, hints: state.hintLevel, done: true
+        text: currentExercise().text, errors: state.errors, hints: state.hintLevel, shownText: state.shownText, done: true
     };
 }
 
@@ -593,6 +597,11 @@ function finishAssembly() {
     state.shownText = [item.text, ...(item.alt || [])].find(text => matchesAnOrder(placed, [sentenceWords(text)])) || item.text;
     state.completed = true;
     saveStat();
+    showFinalSentence("Muito bem! A frase está montada.");
+    speak(`Muito bem! ${state.shownText}`);
+}
+
+function showFinalSentence(message) {
     sentenceArea.innerHTML = "";
     const finalSentence = document.createElement("span");
     finalSentence.className = "final-sentence";
@@ -600,10 +609,16 @@ function finishAssembly() {
     sentenceArea.appendChild(finalSentence);
     hintButton.hidden = true;
     listenButton.classList.add("visible");
-    setFeedback("success", "Muito bem! A frase está montada.", "fa-circle-check");
+    setFeedback("success", message, "fa-circle-check");
     updateCounters();
     openSpeechPanel();
-    speak(`Muito bem! ${state.shownText}`);
+}
+
+// Frase que já foi montada (a pessoa voltou pra ela): aparece resolvida, sem
+// repetir o elogio, e a navegação pra frente continua liberada.
+function showSolved(stat) {
+    Object.assign(state, { completed: true, errors: stat.errors, hintLevel: stat.hints, shownText: stat.shownText });
+    showFinalSentence("Esta frase já foi montada.");
 }
 
 // ── Pistas em escada ──────────────────────────────────────────────────────
@@ -659,6 +674,11 @@ function renderExercise() {
     hintButton.querySelector("span").textContent = "Preciso de ajuda";
     setFeedback("", "Arraste uma palavra para o lugar certo, ou toque em duas palavras para trocá-las.");
     updateCounters();
+    const previous = state.stats[state.round];
+    if (previous?.done) {
+        showSolved(previous);
+        return;
+    }
     getTtsAudio(item.text).catch(() => { /* o clique usa a voz nativa se precisar */ });
 }
 
@@ -688,8 +708,7 @@ function renderSummary() {
     const cards = [
         [done.length, "frases montadas"],
         [formatTime(Date.now() - timerStart), "tempo total"],
-        [done.reduce((sum, stat) => sum + stat.hints, 0), "pistas usadas"],
-        [state.stats.filter(stat => !stat.done).length, "frases puladas"]
+        [done.reduce((sum, stat) => sum + stat.hints, 0), "pistas usadas"]
     ];
     const grid = document.getElementById("summary-grid");
     grid.innerHTML = "";
@@ -704,12 +723,9 @@ function renderSummary() {
     });
     const rows = document.getElementById("summary-rows");
     rows.innerHTML = "";
-    state.stats.forEach(stat => {
+    done.forEach(stat => {
         const row = document.createElement("tr");
-        const values = stat.done
-            ? [stat.text, stat.errors, stat.hints]
-            : [stat.text, "Pulou a frase", "—"];
-        values.forEach(value => {
+        [stat.text, stat.errors, stat.hints].forEach(value => {
             const cell = document.createElement("td");
             cell.textContent = value;
             row.appendChild(cell);
@@ -727,15 +743,15 @@ function startLevel() {
     renderExercise();
 }
 
-// Sai da frase atual guardando o resultado. Dá pra avançar sem montar (fica
-// registrado como frase pulada) e voltar pra refazer.
+// Troca de frase. Pra frente, só depois de montar a atual; voltar é livre (a
+// frase anterior reaparece já montada).
 async function leaveRound(step) {
     const target = state.round + step;
     if (target < 0) return;
+    if (step > 0 && !state.completed) return;
     stopAudio();
     closeSpeechPanel();
     if (state.completed) saveStat();
-    else if (!state.stats[state.round]) state.stats[state.round] = { text: currentExercise().text, done: false };
     if (target >= levels[state.level].length) {
         renderSummary();
         return;

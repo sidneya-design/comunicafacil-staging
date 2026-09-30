@@ -139,7 +139,7 @@ body.embedded-mode .speech-button { min-height: 46px; }
 }
 
 .summary-card h2 { margin: 0 0 18px; font-size: 1.6rem; color: var(--green); }
-.summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+.summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
 .summary-grid div { padding: 14px; background: #f8f6fd; border: 1px solid var(--line); border-radius: 15px; text-align: center; }
 .summary-grid strong { display: block; font-size: 1.7rem; }
 .summary-grid span { color: var(--muted); font-size: .82rem; font-weight: 650; }
