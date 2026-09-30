@@ -102,7 +102,7 @@ function evictTtsLocalStorageCache() {
         const keysToRemove = [];
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
-            if (key && (key.startsWith('comunica_tts_v1:') || key.startsWith('comunica_tts_v2:'))) {
+            if (key && key.startsWith('comunica_tts_')) {
                 keysToRemove.push(key);
             }
         }
@@ -236,6 +236,208 @@ function stripWordHtml(html) {
     return temp.textContent || '';
 }
 
+// Preto ou branco por trás do texto, conforme o brilho da cor de fundo (fórmula
+// YIQ) — necessário porque "Cor do Card" agora aceita qualquer hex custom (ver
+// initCardColorPicker), então não dá mais pra assumir "#111" fixo como nas 7
+// cores pastel de sempre (todas claras).
+function getContrastTextColor(hex) {
+    const clean = (hex || '').replace('#', '');
+    const full = clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean;
+    const r = parseInt(full.substring(0, 2), 16) || 0;
+    const g = parseInt(full.substring(2, 4), 16) || 0;
+    const b = parseInt(full.substring(4, 6), 16) || 0;
+    const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+    return yiq >= 150 ? '#111' : '#fff';
+}
+
+// "Cor do Card": paleta fixa de sempre (vira classe .border-<nome>, igual ao
+// resto do app) + um seletor nativo pra qualquer outra cor (aí salva o hex cru
+// no lugar do nome — ver renderExerciseCards/isCustomCardColor). Usado nos 4
+// tipos de exercício que têm campo "Cor do Card" (Slides, Sílabas, Áudio Real,
+// Leitura de Texto) — não em "Cor da Borda"/"Categoria (cor)" de mídias e
+// clipes de áudio, que são um select diferente, sem pedido pra mudar.
+const CARD_COLOR_PRESETS = [
+    { value: 'pink', hex: '#F8BBD0', label: 'Rosa' },
+    { value: 'orange', hex: '#FFCA28', label: 'Laranja' },
+    { value: 'blue', hex: '#4FC3F7', label: 'Azul' },
+    { value: 'green', hex: '#D4E157', label: 'Verde' },
+    { value: 'red', hex: '#EF9A9A', label: 'Vermelho' },
+    { value: 'yellow', hex: '#FFF59D', label: 'Amarelo' },
+    { value: 'gray', hex: '#E0E0E0', label: 'Cinza' },
+    // Cores vivas pedidas depois, sem classe .border-<nome> própria — o
+    // value já é o hex, então caem direto no caminho de cor custom
+    // (isCustomCardColor) na hora de renderizar o card.
+    { value: '#388E3C', hex: '#388E3C', label: 'Verde Escuro' },
+    { value: '#FB8C00', hex: '#FB8C00', label: 'Laranja Vivo' },
+    { value: '#6A1B9A', hex: '#6A1B9A', label: 'Roxo' },
+    { value: '#1A237E', hex: '#1A237E', label: 'Azul Marinho' }
+];
+
+// Cores customizadas que o usuário salvou (botão "marcador" ao lado do
+// seletor nativo) ficam em localStorage — por navegador/perfil, não
+// sincroniza entre médicos nem dispositivos, mas cobre o pedido de "salvar
+// pros próximos cards" sem precisar de tabela nova no banco.
+const CUSTOM_CARD_COLORS_KEY = 'comunicafacil_custom_card_colors_v1';
+const CUSTOM_CARD_COLORS_MAX = 16;
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+function loadCustomCardColors() {
+    try {
+        const raw = localStorage.getItem(CUSTOM_CARD_COLORS_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr.filter(c => HEX_COLOR_RE.test(c)) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function addCustomCardColor(hex) {
+    if (!HEX_COLOR_RE.test(hex || '')) return;
+    const normalized = hex.toUpperCase();
+    if (CARD_COLOR_PRESETS.some(p => p.hex.toUpperCase() === normalized)) return;
+    const colors = loadCustomCardColors().filter(c => c.toUpperCase() !== normalized);
+    colors.unshift(normalized);
+    if (colors.length > CUSTOM_CARD_COLORS_MAX) colors.length = CUSTOM_CARD_COLORS_MAX;
+    try { localStorage.setItem(CUSTOM_CARD_COLORS_KEY, JSON.stringify(colors)); } catch (e) { }
+    refreshAllCardColorPickers();
+}
+
+function removeCustomCardColor(hex) {
+    const colors = loadCustomCardColors().filter(c => c.toUpperCase() !== (hex || '').toUpperCase());
+    try { localStorage.setItem(CUSTOM_CARD_COLORS_KEY, JSON.stringify(colors)); } catch (e) { }
+    refreshAllCardColorPickers();
+}
+
+// Todo picker montado na página agora (outros modais fechados nem existem no
+// DOM ainda) reflete a lista salva na hora — assim salvar uma cor num
+// exercício já deixa ela disponível se o usuário abrir outro tipo em seguida.
+function refreshAllCardColorPickers() {
+    document.querySelectorAll('.card-color-picker[data-hidden-input]').forEach(renderSavedCardColorSwatches);
+}
+
+function renderSavedCardColorSwatches(picker) {
+    const savedContainer = picker.querySelector('.card-color-saved');
+    const hiddenInput = document.getElementById(picker.dataset.hiddenInput);
+    const customInput = document.getElementById(picker.dataset.customInput);
+    if (!savedContainer || !hiddenInput) return;
+    const currentValue = (hiddenInput.value || '').toUpperCase();
+    savedContainer.innerHTML = '';
+
+    loadCustomCardColors().forEach(hex => {
+        const wrap = document.createElement('span');
+        wrap.className = 'card-color-swatch-wrap';
+
+        const swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.className = 'card-color-swatch card-color-swatch-saved';
+        swatch.dataset.value = hex;
+        swatch.style.backgroundColor = hex;
+        swatch.title = hex;
+        swatch.setAttribute('aria-label', `Cor salva ${hex}`);
+        if (hex.toUpperCase() === currentValue) swatch.classList.add('is-selected');
+        swatch.addEventListener('click', () => {
+            hiddenInput.value = hex;
+            picker.querySelectorAll('.card-color-swatch').forEach(s => s.classList.remove('is-selected'));
+            customInput?.classList.remove('is-selected');
+            swatch.classList.add('is-selected');
+        });
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'card-color-swatch-remove';
+        removeBtn.title = 'Remover esta cor salva';
+        removeBtn.setAttribute('aria-label', 'Remover cor salva');
+        removeBtn.innerHTML = '&times;';
+        removeBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            removeCustomCardColor(hex);
+        });
+
+        wrap.appendChild(swatch);
+        wrap.appendChild(removeBtn);
+        savedContainer.appendChild(wrap);
+    });
+}
+
+function initCardColorPicker(pickerId, hiddenInputId, customInputId) {
+    const picker = document.getElementById(pickerId);
+    const hiddenInput = document.getElementById(hiddenInputId);
+    const customInput = document.getElementById(customInputId);
+    if (!picker || !hiddenInput || !customInput || picker.dataset.wired) return;
+    picker.dataset.wired = '1';
+    picker.dataset.hiddenInput = hiddenInputId;
+    picker.dataset.customInput = customInputId;
+
+    const clearSelection = () => {
+        picker.querySelectorAll('.card-color-swatch').forEach(s => s.classList.remove('is-selected'));
+        customInput.classList.remove('is-selected');
+    };
+
+    const customWrap = customInput.closest('.card-color-custom-wrap') || customInput;
+
+    CARD_COLOR_PRESETS.forEach(preset => {
+        const swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.className = 'card-color-swatch';
+        swatch.dataset.value = preset.value;
+        swatch.style.backgroundColor = preset.hex;
+        swatch.title = preset.label;
+        swatch.setAttribute('aria-label', preset.label);
+        swatch.addEventListener('click', () => {
+            hiddenInput.value = preset.value;
+            clearSelection();
+            swatch.classList.add('is-selected');
+        });
+        picker.insertBefore(swatch, customWrap);
+    });
+
+    const savedContainer = document.createElement('div');
+    savedContainer.className = 'card-color-saved';
+    picker.insertBefore(savedContainer, customWrap);
+    renderSavedCardColorSwatches(picker);
+
+    customInput.addEventListener('input', () => {
+        hiddenInput.value = customInput.value;
+        clearSelection();
+        customInput.classList.add('is-selected');
+    });
+
+    const saveBtn = document.getElementById(customInputId.replace(/-custom$/, '-save'));
+    saveBtn?.addEventListener('click', () => {
+        addCustomCardColor(customInput.value);
+    });
+}
+
+function setCardColorPickerValue(pickerId, hiddenInputId, customInputId, value) {
+    initCardColorPicker(pickerId, hiddenInputId, customInputId);
+    const picker = document.getElementById(pickerId);
+    const hiddenInput = document.getElementById(hiddenInputId);
+    const customInput = document.getElementById(customInputId);
+    if (!picker || !hiddenInput || !customInput) return;
+
+    const preset = CARD_COLOR_PRESETS.find(p => p.value === value);
+    hiddenInput.value = value || 'pink';
+    // Comparação sem diferenciar maiúsculas: hex digitado no seletor nativo do
+    // navegador sempre sai minúsculo, mas o que fica salvo na paleta de "cores
+    // salvas" é normalizado em maiúsculas (ver addCustomCardColor) — sem isso
+    // o swatch salvo não acendia como selecionado ao reabrir pra editar.
+    const valueUpper = (value || '').toUpperCase();
+    picker.querySelectorAll('.card-color-swatch').forEach(s => s.classList.toggle('is-selected', (s.dataset.value || '').toUpperCase() === valueUpper));
+    // O seletor nativo só reflete a cor quando ELE é a escolha atual — herdar o
+    // hex de um preset aqui faria o círculo dele às vezes mostrar a mesma cor
+    // de um preset ao lado (ex: fica rosa igual ao swatch "Rosa"), parecendo
+    // repetido; sem escolha custom ainda, mantém o branco padrão com o "+".
+    if (preset) {
+        customInput.classList.remove('is-selected');
+    } else if (/^#/.test(value || '')) {
+        customInput.value = value;
+        customInput.classList.add('is-selected');
+    } else {
+        customInput.classList.remove('is-selected');
+    }
+    renderSavedCardColorSwatches(picker);
+}
+
 // Um bloco de palavra pode ter mais de um editor rico (Palavra Escrita e
 // Sílabas, cada um com seu próprio toolbar) — liga cada um pelo seu
 // .form-group, senão wireWordEditorToolbar acharia sempre o primeiro campo
@@ -332,6 +534,12 @@ async function fetchArasaacImage(word) {
 // ====================================================
 const USAGE_STORAGE_KEY = 'comunicafacil_usage_local_v1';
 const USAGE_HEARTBEAT_MS = 10000;
+// status:'active' só vira 'closed' no pagehide/logout (ver closeUsageSession) — se o
+// app for fechado à força, o dispositivo travar/dormir ou a aba for morta em segundo
+// plano, esse evento nunca dispara e a sessão fica "active" pra sempre no banco. Por
+// isso "sessões ativas agora" não pode confiar só no status: também exige um
+// last_seen_at recente (heartbeat só atualiza com a aba visível, a cada 10s).
+const USAGE_ACTIVE_NOW_THRESHOLD_MS = 3 * 60 * 1000;
 const USAGE_VIEW_LABELS = {
     'view-core': 'Essenciais',
     'view-topics': 'Tópicos',
@@ -782,6 +990,7 @@ function getSectionLabel(sectionId) {
         'game:memory-alphabet': 'Jogo: Memória do Alfabeto',
         'game:jogo2': 'Jogo: Trilha de Aprendizado de Forças',
         'game:complete-sentence': 'Jogo: Complete a Frase',
+        'game:monte-frase': 'Jogo: Monte a Frase',
         'game:naming': 'Jogo: Reconhecimento de Palavras',
         'game:afasia': 'Jogo: Reconhecimento de Imagem'
     };
@@ -908,6 +1117,27 @@ function trackUsageActivity(label, meta = {}) {
     trackUsageEvent('activity', label, meta);
 }
 
+// Log de auditoria pro admin (aba Empresas → médico): diferente de
+// trackUsageActivity (insights de engajamento do paciente), isso é sobre
+// prestação de contas do médico — o que ele criou/editou/excluiu/liberou.
+// Só médicos gravam aqui (RLS de admin_action_log só aceita insert de
+// is_doctor()); fire-and-forget, uma falha aqui nunca deve travar a ação
+// real do médico que a chamou.
+function logAdminAction(action, entityType, entityLabel, detail = null) {
+    if (!supabaseClient || !isDoctor || !currentUserId) return;
+    supabaseClient.from('admin_action_log').insert([{
+        actor_user_id: currentUserId,
+        actor_email: usageCurrentUser?.email || 'sem e-mail',
+        company_id: currentUserCompanyId,
+        action,
+        entity_type: entityType,
+        entity_label: entityLabel || null,
+        detail
+    }]).then(({ error }) => {
+        if (error) console.warn('Erro ao salvar log de ação admin:', error);
+    });
+}
+
 function startUsageActivity(label, meta = {}) {
     if (!usageCurrentUser || !label) return;
     const key = meta.key || label;
@@ -966,6 +1196,11 @@ function formatUsageDateTime(iso) {
     return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+function isSessionActiveNow(session) {
+    if (!session || session.status !== 'active' || !session.lastSeenAt) return false;
+    return (Date.now() - new Date(session.lastSeenAt).getTime()) <= USAGE_ACTIVE_NOW_THRESHOLD_MS;
+}
+
 async function getUsageAggregate(allowedUserIds = null) {
     // allowedUserIds restringe a agregação a uma lista específica de
     // usuários — usado pelo médico, que só pode ver o uso dos próprios
@@ -976,7 +1211,7 @@ async function getUsageAggregate(allowedUserIds = null) {
             let sessionsQuery = supabaseClient
                 .from('usage_sessions')
                 .select('*')
-                .order('start_at', { ascending: false })
+                .order('last_seen_at', { ascending: false })
                 .limit(100);
             let eventsQuery = supabaseClient
                 .from('usage_events')
@@ -1048,6 +1283,20 @@ async function getUsageAggregate(allowedUserIds = null) {
                     u.totalEvents = (u.totalEvents || 0) + 1;
                     if (event.timestamp && (!u.lastSeenAt || new Date(event.timestamp) > new Date(u.lastSeenAt))) {
                         u.lastSeenAt = event.timestamp;
+                    }
+
+                    // O "último acesso" por atividade normalmente vem do blob activities
+                    // da sessão (acima), mas uma sessão longa-porém-ativa pode cair fora
+                    // da janela do limit(100) antes de ser reagregada. usage_events tem
+                    // timestamp exato por acesso e serve de reforço, sem afetar
+                    // count/totalSeconds (que continuam vindo só das sessões).
+                    if (event.type === 'activity' && event.label) {
+                        const normalizedLabel = normalizeUsageActivityLabel(event.label);
+                        if (normalizedLabel && !normalizedLabel.toLowerCase().startsWith('tela:')) {
+                            const lastAccessBump = { count: 0, totalSeconds: 0, lastAccessAt: event.timestamp };
+                            mergeActivityAggregate(u.activities, normalizedLabel, lastAccessBump);
+                            mergeActivityAggregate(activityStatsTotals, normalizedLabel, lastAccessBump);
+                        }
                     }
                 });
 
@@ -1348,10 +1597,9 @@ async function renderUsageDashboard(idPrefix = 'usage', allowedUserIds = null) {
             };
         })
         .sort((a, b) => {
-            if ((b.totalSeconds || 0) !== (a.totalSeconds || 0)) {
-                return (b.totalSeconds || 0) - (a.totalSeconds || 0);
-            }
-            return (b.count || 0) - (a.count || 0);
+            const at = a.lastAccessAt ? new Date(a.lastAccessAt).getTime() : -Infinity;
+            const bt = b.lastAccessAt ? new Date(b.lastAccessAt).getTime() : -Infinity;
+            return bt - at;
         });
 
     const topActivities = activityEntries.slice(0, 5).map(item => ({
@@ -1380,7 +1628,7 @@ async function renderUsageDashboard(idPrefix = 'usage', allowedUserIds = null) {
         label: formatUsageActivityDisplayLabel(meta.label),
         value: normalizeActivityStats((selectedUserId() && selectedUserRecord) ? (selectedUserRecord.activities[meta.label] || 0) : (aggregate.activityStatsTotals[meta.label] || 0))
     }));
-    if (!usageTableSortByPrefix[idPrefix]) usageTableSortByPrefix[idPrefix] = { key: 'totalSeconds', dir: 'desc' };
+    if (!usageTableSortByPrefix[idPrefix]) usageTableSortByPrefix[idPrefix] = { key: 'lastAccessAt', dir: 'desc' };
     const tableSort = usageTableSortByPrefix[idPrefix];
     const activityTableEntries = [...catalogActivityEntries]
         .map(item => ({
@@ -1409,7 +1657,7 @@ async function renderUsageDashboard(idPrefix = 'usage', allowedUserIds = null) {
 
     const filteredSessions = selectedUserId() ? aggregate.sessions.filter(s => s.userId === selectedUserId()) : aggregate.sessions;
 
-    const activeSessions = filteredSessions.filter(session => session.status === 'active')
+    const activeSessions = filteredSessions.filter(isSessionActiveNow)
         .sort((a, b) => (b.activeSeconds || 0) - (a.activeSeconds || 0))
         .slice(0, 5)
         .map(session => ({
@@ -1436,7 +1684,7 @@ async function renderUsageDashboard(idPrefix = 'usage', allowedUserIds = null) {
     const totalActions = activityEntries.reduce((sum, item) => sum + (item.count || 0), 0);
     const topActivity = activityEntries[0] ? activityEntries[0] : null;
     const totalSessions = filteredSessions.length;
-    const activeSessionsCount = filteredSessions.filter(session => session.status === 'active').length;
+    const activeSessionsCount = filteredSessions.filter(isSessionActiveNow).length;
     const avgSessionSeconds = totalSessions > 0 ? Math.round(totalActiveSeconds / totalSessions) : 0;
     const topShare = totalActions > 0 && topActivity ? Math.round((topActivity.count / totalActions) * 100) : 0;
 
@@ -1619,7 +1867,7 @@ function setDoctorTab(tabName) {
 }
 
 function setAdminTab(tabName) {
-    const tabs = ['users', 'companies', 'usage', 'modules'];
+    const tabs = ['users', 'companies', 'usage', 'modules', 'logs'];
     
     tabs.forEach(tab => {
         const btn = document.getElementById(`btn-admin-tab-${tab}`);
@@ -1642,6 +1890,8 @@ function setAdminTab(tabName) {
         renderUsageDashboard();
     } else if (tabName === 'modules') {
         applyModuleVisibility(); // Refreshes UI and re-renders the panel
+    } else if (tabName === 'logs') {
+        loadAdminLogsPanel();
     }
 }
 
@@ -1686,6 +1936,27 @@ function prefetchViewAudio(viewId) {
     });
 }
 
+const LAST_ACTIVE_VIEW_KEY = 'comunica_last_active_view_v1';
+
+function getLastActiveView() {
+    try { return localStorage.getItem(LAST_ACTIVE_VIEW_KEY); } catch (e) { return null; }
+}
+
+function setLastActiveView(viewId) {
+    if (!viewId) return;
+    try { localStorage.setItem(LAST_ACTIVE_VIEW_KEY, viewId); } catch (e) { /* localStorage indisponível */ }
+}
+
+// Só o admin volta pra última tela; os demais usuários sempre abrem nos Essenciais.
+function restoreLastActiveView() {
+    if (!canManageUsers) return;
+    const savedView = getLastActiveView();
+    if (!savedView || savedView === 'view-core') return;
+    const btn = document.querySelector(`.nav-btn[data-view="${savedView}"]`);
+    if (!btn || getComputedStyle(btn).display === 'none' || btn.disabled) return;
+    if (!btn.classList.contains('active')) btn.click();
+}
+
 function setupNavigation() {
     const navBtns = document.querySelectorAll('.nav-btn');
     const views = document.querySelectorAll('.view-section');
@@ -1693,12 +1964,14 @@ function setupNavigation() {
 
     navBtns.forEach(btn => {
         btn.addEventListener('click', () => {
+            const targetView = btn.dataset.view;
+            if (!targetView) return;
             navBtns.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
             views.forEach(v => v.classList.remove('active'));
             btn.classList.add('active');
             btn.setAttribute('aria-pressed', 'true');
-            
-            const targetView = btn.dataset.view;
+            setLastActiveView(targetView);
+
             const viewElement = document.getElementById(targetView);
             if (viewElement) {
                 viewElement.classList.add('active');
@@ -1712,6 +1985,10 @@ function setupNavigation() {
                     window.location.origin
                 );
             }
+            document.getElementById('monte-frase-frame')?.contentWindow?.postMessage(
+                { type: 'monte-frase:pause-audio' },
+                window.location.origin
+            );
 
             // Saiu da aba Áudios com algo tocando (player normal ou os dois
             // slots do modo comparar) — sem isso o clipe seguia tocando por
@@ -1755,6 +2032,8 @@ function setupNavigation() {
             }
         });
     });
+
+    setTimeout(restoreLastActiveView, 0);
 }
 
 async function renderGrid(containerId, wordsArray) {
@@ -1869,8 +2148,31 @@ function _speakNative(text) {
 // Para o clique responder na hora, o áudio é pré-carregado quando o slide aparece
 // (prefetchTts) e guardado em dois níveis: memória (promessas, deduplica requisições
 // em andamento) e localStorage (sobrevive a reload e funciona offline).
-const azureTtsCache = new Map(); // texto -> Promise<string base64>
-const TTS_STORAGE_PREFIX = 'comunica_tts_v2:';
+const azureTtsCache = new Map(); // texto -> Promise<{audio: string base64, words: []}>
+// v4: volta a guardar só a string base64 (v3 chegou a guardar {audio, words}
+// pro destaque de palavra, removido por enquanto — ver getTtsAudio). Prefixo
+// novo pra não reler cache v3 no formato de objeto por engano; evictTtsLocalStorageCache
+// limpa todas as versões antigas.
+const TTS_STORAGE_PREFIX = 'comunica_tts_v4:';
+// Teto de entradas de áudio no localStorage (~16KB cada → ~2,5MB). Sem teto o
+// cache enchia a quota (~5MB) e o token de sessão do Supabase deixava de ser
+// salvo, causando loop de login. Ao passar do teto, remove um lote das mais
+// antigas (ordem de inserção do localStorage) — são fáceis de baixar de novo.
+const TTS_STORAGE_MAX_ENTRIES = 150;
+const TTS_STORAGE_TRIM_BATCH = 30;
+
+function trimTtsLocalStorageCache() {
+    try {
+        const ttsKeys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('comunica_tts_')) ttsKeys.push(key);
+        }
+        if (ttsKeys.length < TTS_STORAGE_MAX_ENTRIES) return;
+        ttsKeys.slice(0, ttsKeys.length - TTS_STORAGE_MAX_ENTRIES + TTS_STORAGE_TRIM_BATCH)
+            .forEach(k => localStorage.removeItem(k));
+    } catch (e) { /* localStorage indisponível: nada a fazer */ }
+}
 
 // A function 'chat' agora exige sessão válida (fecha proxy aberto pro
 // serviço pago da Azure) — anexa o token do usuário logado em toda chamada
@@ -1908,21 +2210,62 @@ async function fetchTtsAudio(endpoint, text, ttsRate) {
 // rateKey identifica o cache ("" = voz normal de sempre, mesma chave já usada
 // em produção); ttsRate é o valor de verdade mandado pro backend (SSML
 // <prosody rate>), só quando rateKey não é o padrão.
-function getTtsAudio(text, rateKey, ttsRate) {
+// Pré-carregamento de áudio com poucas requisições por vez. Antes, abrir uma aba
+// disparava dezenas de chamadas ao TTS juntas, e o primeiro toque num card
+// esperava todas na fila (~6s sem som). Agora o pré-carregamento usa no máximo
+// TTS_PREFETCH_CONCURRENCY conexões, e um toque (isPrefetch=false) fura a fila:
+// se aquele texto ainda estava esperando vez, começa na hora.
+const TTS_PREFETCH_CONCURRENCY = 3;
+let ttsPrefetchActive = 0;
+const ttsPrefetchQueue = []; // cacheKeys na ordem de chegada
+const ttsPrefetchWaiting = new Map(); // cacheKey -> start(usesSlot)
+
+function pumpTtsPrefetchQueue() {
+    while (ttsPrefetchActive < TTS_PREFETCH_CONCURRENCY && ttsPrefetchQueue.length) {
+        const start = ttsPrefetchWaiting.get(ttsPrefetchQueue.shift());
+        if (!start) continue; // já foi promovido por um toque
+        ttsPrefetchActive++;
+        start(true);
+    }
+}
+
+// Resolve com true quando ocupou uma vaga da fila (precisa liberar depois) ou
+// false quando foi promovido por um toque (roda fora do limite).
+function waitTtsPrefetchSlot(cacheKey) {
+    return new Promise(resolve => {
+        ttsPrefetchWaiting.set(cacheKey, usesSlot => { ttsPrefetchWaiting.delete(cacheKey); resolve(usesSlot); });
+        ttsPrefetchQueue.push(cacheKey);
+        pumpTtsPrefetchQueue();
+    });
+}
+
+function releaseTtsPrefetchSlot() {
+    ttsPrefetchActive--;
+    pumpTtsPrefetchQueue();
+}
+
+function getTtsAudio(text, rateKey, ttsRate, isPrefetch = false) {
     const cacheKey = rateKey ? (text + '::rate::' + rateKey) : text;
-    if (azureTtsCache.has(cacheKey)) return azureTtsCache.get(cacheKey);
+    if (azureTtsCache.has(cacheKey)) {
+        if (!isPrefetch) ttsPrefetchWaiting.get(cacheKey)?.(false);
+        return azureTtsCache.get(cacheKey);
+    }
     const promise = (async () => {
         try {
             const stored = localStorage.getItem(TTS_STORAGE_PREFIX + cacheKey);
             if (stored) return stored;
         } catch (e) { /* localStorage indisponível: segue para o backend */ }
+        const usesSlot = isPrefetch ? await waitTtsPrefetchSlot(cacheKey) : false;
         let audioBase64;
         try {
             audioBase64 = await fetchTtsAudio(AZURE_AI_ENDPOINT, text, ttsRate);
         } catch (primaryError) {
             if (AZURE_AI_ENDPOINT === SUPABASE_CHAT_ENDPOINT) throw primaryError;
             audioBase64 = await fetchTtsAudio(SUPABASE_CHAT_ENDPOINT, text, ttsRate);
+        } finally {
+            if (usesSlot) releaseTtsPrefetchSlot();
         }
+        trimTtsLocalStorageCache();
         try {
             localStorage.setItem(TTS_STORAGE_PREFIX + cacheKey, audioBase64);
         } catch (e) {
@@ -1937,7 +2280,7 @@ function getTtsAudio(text, rateKey, ttsRate) {
 }
 
 function prefetchTts(text) {
-    if (text) getTtsAudio(text).catch(() => { /* erro tratado no clique */ });
+    if (text) getTtsAudio(text, null, null, true).catch(() => { /* erro tratado no clique */ });
 }
 
 // Velocidades do player de "Leitura de Texto": sintetizadas já na velocidade
@@ -2152,7 +2495,7 @@ async function migrateLocalMediaAndExercises() {
                 if (ex.gameKind) continue;
                 currentEditingExerciseId = null; // force insert as new
                 currentEditingExerciseForkSource = null;
-                await saveExercisePlaylistToDB(ex.title, ex.items || []);
+                await saveExercisePlaylistToDB(ex.title, ex.items || [], null, null, ex.autoPictograms !== false);
                 db.transaction(['exercises'], 'readwrite').objectStore('exercises').delete(ex.id);
             }
             resolve();
@@ -2249,6 +2592,7 @@ async function saveMediaToDB(title, fileBlob, mimeType, colorClass, mediaUrl, pa
                 const url = await uploadToSupabaseStorage('media_uploads', 'medias', fileBlob);
                 await supabaseClient.from('medias').insert([{ title, is_video: isVideo, color_class: colorClass, media_url: url, ...extraFields }]);
             }
+            logAdminAction('create', 'media', title);
             loadMediaCards();
             return;
         } catch (e) {
@@ -2275,6 +2619,7 @@ async function updateMediaInDB(media, title, fileBlob, mimeType, colorClass, med
 
     if (media.fromSupabase && supabaseClient) {
         await supabaseClient.from('medias').update(updateFields).eq('id', media.id);
+        logAdminAction('update', 'media', title);
         loadMediaCards();
         return;
     }
@@ -2518,6 +2863,7 @@ function renderMediaCards(mediasArray) {
                 ev.stopPropagation();
                 if (confirm('Apagar?')) {
                     await supabaseClient.from('medias').delete().eq('id', media.id);
+                    logAdminAction('delete', 'media', media.title);
                     loadMediaCards();
                 }
             };
@@ -2571,12 +2917,13 @@ async function getOrCreateExerciseFork(sourceId, title, doctorUserId) {
             .upsert({ patient_id: activePatientContext.id, exercise_id: forkId, visible: true, updated_at: new Date().toISOString() });
         await supabaseClient.from('patient_exercise_flags')
             .upsert({ patient_id: activePatientContext.id, exercise_id: sourceId, visible: false, updated_at: new Date().toISOString() });
+        logAdminAction('release', 'exercise', title, `Cópia própria substituiu a do admin — paciente: ${activePatientContext.name || activePatientContext.email}`);
     }
 
     return forkId;
 }
 
-async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null, companyId = null) {
+async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null, companyId = null, autoPictograms = true) {
     // Exercícios só-locais (ex.: os semeados por seedLocalPracticeExercises) têm um id
     // de IndexedDB, não um id do Supabase. Se tentássemos o caminho do Supabase pra eles,
     // o update/delete usaria esse id local contra a tabela real e não bateria com nada —
@@ -2607,7 +2954,9 @@ async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null, 
                 // seletor "Enviar para empresa" é dele) — se um médico editasse e
                 // isso fosse incondicional, a cada save apagaria o company_id que o
                 // admin tinha setado (companyId chega null pro médico).
-                const updateFields = isAdmin ? { title, company_id: companyId } : { title };
+                const updateFields = isAdmin
+                    ? { title, auto_pictograms: autoPictograms, company_id: companyId }
+                    : { title, auto_pictograms: autoPictograms };
                 const { error: updateErr } = await supabaseClient.from('exercises').update(updateFields).eq('id', targetExerciseId);
                 if (updateErr) throw updateErr;
                 const { error: deleteErr } = await supabaseClient.from('exercise_items').delete().eq('exercise_id', targetExerciseId);
@@ -2623,8 +2972,8 @@ async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null, 
                 // Exercício de médico entra direto no banco dele (ninguém mais vê até
                 // ele liberar por paciente em "Meus Pacientes" — patient_exercise_flags).
                 const newExercisePayload = doctorUserId
-                    ? { title, visible: true, doctor_user_id: doctorUserId, company_id: currentUserCompanyId }
-                    : { title, visible: false, company_id: companyId };
+                    ? { title, auto_pictograms: autoPictograms, visible: true, doctor_user_id: doctorUserId, company_id: currentUserCompanyId }
+                    : { title, auto_pictograms: autoPictograms, visible: false, company_id: companyId };
                 const { data: exData, error: insertErr } = await supabaseClient.from('exercises').insert([newExercisePayload]).select().single();
                 if (insertErr) throw insertErr;
                 const dbItems = uploadedItems.map(item => ({
@@ -2635,6 +2984,7 @@ async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null, 
                 const { error: itemsErr } = await supabaseClient.from('exercise_items').insert(dbItems);
                 if (itemsErr) throw itemsErr;
             }
+            logAdminAction(currentEditingExerciseId ? 'update' : 'create', 'exercise', title);
             currentEditingExerciseForkSource = null;
             loadExerciseCards();
             return;
@@ -2648,12 +2998,12 @@ async function saveExercisePlaylistToDB(title, itemsArray, doctorUserId = null, 
         db.transaction(['exercises'], 'readonly').objectStore('exercises').get(currentEditingExerciseId).onsuccess = (e) => {
             const existing = e.target.result || {};
             db.transaction(['exercises'], 'readwrite').objectStore('exercises')
-                .put({ ...existing, id: currentEditingExerciseId, title, items: itemsArray })
+                .put({ ...existing, id: currentEditingExerciseId, title, items: itemsArray, autoPictograms })
                 .onsuccess = () => loadExerciseCards();
         };
     } else {
         db.transaction(['exercises'], 'readwrite').objectStore('exercises')
-            .add({ title, items: itemsArray, visible: false })
+            .add({ title, items: itemsArray, visible: false, autoPictograms })
             .onsuccess = () => loadExerciseCards();
     }
 }
@@ -2693,6 +3043,7 @@ async function saveSyllablesExerciseToDB(title, size, color, font, itemsArray, d
             const { error: itemsErr } = await supabaseClient.from('exercise_items').insert(dbItems);
             if (itemsErr) throw itemsErr;
 
+            logAdminAction(currentEditingSyllablesExerciseId ? 'update' : 'create', 'exercise', title);
             loadExerciseCards();
             return;
         } catch (e) {
@@ -2768,6 +3119,7 @@ async function saveAudioExerciseToDB(title, size, color, font, itemsArray, docto
             const { error: itemsErr } = await supabaseClient.from('exercise_items').insert(dbItems);
             if (itemsErr) throw itemsErr;
 
+            logAdminAction(currentEditingAudioExerciseId ? 'update' : 'create', 'exercise', title);
             loadExerciseCards();
             return;
         } catch (e) {
@@ -2857,6 +3209,7 @@ async function saveReadingTextExerciseToDB(title, text, phrases = [], doctorUser
             const { error: itemsErr } = await supabaseClient.from('exercise_items').insert(dbItems);
             if (itemsErr) throw itemsErr;
 
+            logAdminAction(currentEditingReadingTextExerciseId ? 'update' : 'create', 'exercise', title);
             loadExerciseCards();
             return;
         } catch (e) {
@@ -2892,7 +3245,7 @@ function openEditReadingTextExercise(ex) {
     const colorClass = parts[1] || 'pink';
 
     document.getElementById('reading-text-exercise-title').value = displayTitle;
-    document.getElementById('reading-text-exercise-color').value = colorClass;
+    setCardColorPickerValue('reading-text-exercise-color-picker', 'reading-text-exercise-color', 'reading-text-exercise-color-custom', colorClass);
     document.getElementById('reading-text-content').value = (ex.items && ex.items[0] && ex.items[0].word) || '';
 
     const phrasesContainer = document.getElementById('reading-text-phrases-container');
@@ -2916,27 +3269,106 @@ function openEditReadingTextExercise(ex) {
 // quando o áudio termina sozinho.
 let readingTextActiveButton = null;
 
-function setReadingTextButtonPlaying(button, isPlaying) {
+// state: 'idle' (ainda não tocou / parado), 'playing' (tocando, clique pausa)
+// ou 'paused' (pausado no meio, clique continua de onde parou).
+function setReadingTextButtonState(button, state) {
     if (!button) return;
     const icon = button.querySelector('i');
-    if (icon) icon.className = isPlaying ? 'fas fa-stop' : 'fas fa-volume-up';
+    const iconClass = state === 'playing' ? 'fas fa-pause' : (state === 'paused' ? 'fas fa-play' : 'fas fa-volume-up');
+    if (icon) icon.className = iconClass;
     const label = button.querySelector('.reading-text-play-label');
-    if (label) label.textContent = isPlaying ? 'Parar' : 'Ouvir leitura';
-    else button.title = isPlaying ? 'Parar' : 'Ouvir esta frase';
+    const labelText = state === 'playing' ? 'Pausar' : (state === 'paused' ? 'Continuar' : 'Ouvir leitura');
+    if (label) label.textContent = labelText;
+    else button.title = state === 'playing' ? 'Pausar' : (state === 'paused' ? 'Continuar leitura' : 'Ouvir esta frase');
+}
+
+
+// Barra de progresso do player de Leitura de Texto: sempre reflete
+// currentAudio (só toca um por vez) — clique/arraste na trilha pula pro
+// ponto, e o botão de 5s volta um pouco, pra reler um trecho sem começar
+// tudo de novo.
+function formatReadingTextTime(seconds) {
+    if (!isFinite(seconds) || seconds < 0) seconds = 0;
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// A barra fica sempre visível (mesmo sem nada tocando ainda) — só o conteúdo
+// (onda, tempos) é limpo aqui. A decodificação da onda em si só acontece
+// quando um play é clicado (ver wireReadingTextProgress), não ao abrir o
+// player.
+function resetReadingTextProgress() {
+    drawWaveform([], 0, 'reading-text-waveform-canvas');
+    const timeEl = document.getElementById('reading-text-progress-time');
+    const durationEl = document.getElementById('reading-text-progress-duration');
+    if (timeEl) timeEl.textContent = '0:00';
+    if (durationEl) durationEl.textContent = '0:00';
+}
+
+// currentAudio.src é sempre uma data URL (TTS embutido em base64, ver
+// speakWithAzure) — mesmo conteúdo de texto gera a mesma data URL, então cachear
+// por ela evita redecodificar toda vez que a mesma frase é tocada de novo.
+const readingTextPeaksCache = new Map();
+async function decodeReadingTextPeaks(audioSrc) {
+    if (readingTextPeaksCache.has(audioSrc)) return readingTextPeaksCache.get(audioSrc);
+    try {
+        const peaks = await computeWaveformPeaks(audioSrc);
+        readingTextPeaksCache.set(audioSrc, peaks);
+        return peaks;
+    } catch (e) {
+        console.warn('Não foi possível decodificar a forma de onda da leitura:', e);
+        return [];
+    }
+}
+
+function wireReadingTextProgress(audio) {
+    const timeEl = document.getElementById('reading-text-progress-time');
+    const durationEl = document.getElementById('reading-text-progress-duration');
+    if (!timeEl || !durationEl) return;
+
+    drawWaveform([], 0, 'reading-text-waveform-canvas');
+    timeEl.textContent = '0:00';
+    durationEl.textContent = isFinite(audio.duration) ? formatReadingTextTime(audio.duration) : '0:00';
+    let peaks = [];
+    decodeReadingTextPeaks(audio.src).then(p => {
+        peaks = p;
+        drawWaveform(peaks, audio.duration ? audio.currentTime / audio.duration : 0, 'reading-text-waveform-canvas');
+    });
+
+    const update = () => {
+        const fraction = audio.duration ? (audio.currentTime / audio.duration) : 0;
+        drawWaveform(peaks, fraction, 'reading-text-waveform-canvas');
+        timeEl.textContent = formatReadingTextTime(audio.currentTime);
+        durationEl.textContent = formatReadingTextTime(audio.duration);
+    };
+    audio.addEventListener('timeupdate', update);
+    audio.addEventListener('loadedmetadata', update);
 }
 
 async function toggleReadingTextPlayback(text, button, activityDetail) {
     if (!text) return;
-    if (readingTextActiveButton === button) {
-        if (currentAudio) currentAudio.pause();
-        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-        setReadingTextButtonPlaying(button, false);
-        readingTextActiveButton = null;
+
+    // Mesmo botão que já está tocando/pausado: alterna pausa/continuar sem
+    // re-sintetizar nem perder a posição — currentAudio segue vivo, só
+    // currentAudio.pause()/play() em cima do mesmo áudio já carregado.
+    if (readingTextActiveButton === button && currentAudio) {
+        if (currentAudio.paused) {
+            currentAudio.play();
+            setReadingTextButtonState(button, 'playing');
+        } else {
+            currentAudio.pause();
+            setReadingTextButtonState(button, 'paused');
+        }
         return;
     }
-    if (readingTextActiveButton) setReadingTextButtonPlaying(readingTextActiveButton, false);
+
+    if (readingTextActiveButton) setReadingTextButtonState(readingTextActiveButton, 'idle');
+    if (currentAudio) currentAudio.pause();
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     readingTextActiveButton = button;
-    setReadingTextButtonPlaying(button, true);
+    setReadingTextButtonState(button, 'playing');
+    resetReadingTextProgress();
 
     const label = usageCurrentActivity?.label || 'Exercício';
     trackUsageActivity(label, {
@@ -2947,13 +3379,32 @@ async function toggleReadingTextPlayback(text, button, activityDetail) {
     const rateKey = document.getElementById('reading-text-speed')?.value || '1';
     await speakWithAzure(text, rateKey);
     if (readingTextActiveButton === button && currentAudio) {
+        wireReadingTextProgress(currentAudio);
         currentAudio.addEventListener('ended', () => {
             if (readingTextActiveButton === button) {
-                setReadingTextButtonPlaying(button, false);
+                setReadingTextButtonState(button, 'idle');
                 readingTextActiveButton = null;
+                resetReadingTextProgress();
             }
         }, { once: true });
     }
+}
+
+// Textos do exercício aberto no momento (parágrafo principal + frases) —
+// guardado à parte pra poder pré-carregar de novo quando a velocidade muda
+// (ver #reading-text-speed 'change' em setupModals), já que o cache do TTS é
+// por texto+velocidade e trocar de velocidade sem pré-carregar faria o
+// próximo play esperar a síntese do zero de novo.
+let readingTextOpenTexts = [];
+
+// getTtsAudio já tem cache próprio (memória + localStorage) — chamar de novo
+// aqui não duplica trabalho, só garante que o áudio já está pronto quando o
+// play for clicado (edge-tts é uma síntese de verdade, não instantânea).
+function prefetchReadingTextAudio(texts, rateKey) {
+    const ttsRate = rateKey ? (READING_TEXT_RATE_MAP[rateKey] || null) : null;
+    texts.forEach(t => {
+        if (t) getTtsAudio(t, ttsRate ? rateKey : null, ttsRate, true).catch(() => { /* erro tratado no clique */ });
+    });
 }
 
 function openReadingTextPlayer(ex) {
@@ -2963,18 +3414,21 @@ function openReadingTextPlayer(ex) {
 
     document.getElementById('reading-text-player-modal').style.display = 'flex';
     document.getElementById('reading-text-player-title').textContent = displayTitle;
+    const scrollEl = document.getElementById('reading-text-player-scroll');
+    if (scrollEl) scrollEl.scrollTop = 0;
     const bodyEl = document.getElementById('reading-text-player-body');
     bodyEl.textContent = text;
     bodyEl.dataset.text = text;
     bodyEl.style.display = text ? '' : 'none';
     readingTextActiveButton = null;
+    resetReadingTextProgress();
     const mainPlayBtn = document.getElementById('btn-play-reading-text');
     // Exercício criado só com frases (sem parágrafo principal, ver validação
     // do editor): sem texto, o botão grande "Ouvir leitura" não tem o que
     // tocar e clicar nele não fazia nada — confuso. Some com ele, a
     // velocidade continua valendo pro play de cada frase.
     mainPlayBtn.style.display = text ? '' : 'none';
-    setReadingTextButtonPlaying(mainPlayBtn, false);
+    setReadingTextButtonState(mainPlayBtn, 'idle');
 
     const phrasesEl = document.getElementById('reading-text-player-phrases');
     phrasesEl.innerHTML = '';
@@ -2982,6 +3436,7 @@ function openReadingTextPlayer(ex) {
         const row = document.createElement('div');
         row.className = 'reading-text-player-phrase-row';
         const span = document.createElement('span');
+        span.className = 'reading-text-player-phrase-text';
         span.textContent = phrase;
         const playBtn = document.createElement('button');
         playBtn.type = 'button';
@@ -3001,6 +3456,10 @@ function openReadingTextPlayer(ex) {
         view: 'view-exercises',
         detail: 'Exercício aberto'
     });
+
+    readingTextOpenTexts = [text, ...phrases];
+    const rateKey = document.getElementById('reading-text-speed')?.value || '1';
+    prefetchReadingTextAudio(readingTextOpenTexts, rateKey);
 }
 
 // Adiciona um exercício do "Banco de Prontos" (global do admin, ou um dos 2
@@ -3040,7 +3499,7 @@ async function addReadyBankExerciseToDoctorBank(ex) {
     }));
 
     try {
-        await saveExercisePlaylistToDB(ex.title, mappedItems, currentUserId);
+        await saveExercisePlaylistToDB(ex.title, mappedItems, currentUserId, null, ex.autoPictograms !== false);
     } finally {
         currentEditingExerciseId = previousEditingId;
         currentEditingExerciseFromSupabase = previousEditingFromSupabase;
@@ -3065,7 +3524,8 @@ function getReadyBankCandidates() {
         !isGameContainerSeedKey(ex.seedKey, ALPHABET_MEMORY_SEED_KEY) &&
         !isGameContainerSeedKey(ex.seedKey, NAMING_SEED_KEY) &&
         !isGameContainerSeedKey(ex.seedKey, AFASIA_SEED_KEY) &&
-        !isGameContainerSeedKey(ex.seedKey, COMPLETE_FRASE_SEED_KEY)
+        !isGameContainerSeedKey(ex.seedKey, COMPLETE_FRASE_SEED_KEY) &&
+        !isGameContainerSeedKey(ex.seedKey, MONTE_FRASE_SEED_KEY)
     );
 }
 
@@ -3256,6 +3716,7 @@ async function loadExerciseCards() {
                         companyId: ex.company_id || null,
                         forkedFrom: ex.forked_from || null,
                         gameKind: ex.game_kind || null,
+                        autoPictograms: ex.auto_pictograms !== false,
                         syllablesSize: ex.syllables_size || null,
                         syllablesColor: ex.syllables_color || null,
                         syllablesFont: ex.syllables_font || null
@@ -3304,6 +3765,7 @@ function renderExerciseCards(exercisesArray) {
         !isGameContainerSeedKey(ex.seedKey, NAMING_SEED_KEY) &&
         !isGameContainerSeedKey(ex.seedKey, AFASIA_SEED_KEY) &&
         !isGameContainerSeedKey(ex.seedKey, COMPLETE_FRASE_SEED_KEY) &&
+        !isGameContainerSeedKey(ex.seedKey, MONTE_FRASE_SEED_KEY) &&
         !isGameContainerSeedKey(ex.seedKey, JOGO2_CARDS_SEED_KEY)
     );
 
@@ -3384,9 +3846,14 @@ function renderExerciseCards(exercisesArray) {
         const parts = (ex.title || '').split('|');
         const displayTitle = parts[0];
         const colorClass = parts[1] || 'pink';
+        // "Cor do Card" agora aceita hex livre além dos 7 nomes de sempre (ver
+        // initCardColorPicker) — hex não tem classe .border-<nome> no CSS, então
+        // aplica a cor via inline style em vez de classe.
+        const isCustomCardColor = colorClass.startsWith('#');
 
         const btn = document.createElement('button');
-        btn.className = `word-btn border-${colorClass}` + (isAdmin && ex.visible === false ? ' card-hidden' : '');
+        btn.className = 'word-btn' + (!isCustomCardColor ? ` border-${colorClass}` : '') + (isAdmin && ex.visible === false ? ' card-hidden' : '');
+        if (isCustomCardColor) btn.style.borderColor = colorClass;
 
         const imgContainer = document.createElement('div');
         imgContainer.className = 'word-btn-img-container';
@@ -3443,6 +3910,10 @@ function renderExerciseCards(exercisesArray) {
         const textEl = document.createElement('div');
         textEl.className = 'word-btn-text';
         textEl.textContent = displayTitle;
+        if (isCustomCardColor) {
+            textEl.style.backgroundColor = colorClass;
+            textEl.style.color = getContrastTextColor(colorClass);
+        }
 
         btn.appendChild(imgContainer);
         btn.appendChild(textEl);
@@ -3521,6 +3992,7 @@ function renderExerciseCards(exercisesArray) {
                 ev.stopPropagation();
                 if (confirm(`Apagar exercício "${displayTitle}"?`)) {
                     await supabaseClient.from('exercises').delete().eq('id', ex.id);
+                    logAdminAction('delete', 'exercise', displayTitle);
                     loadExerciseCards();
                 }
             };
@@ -3863,6 +4335,7 @@ async function saveAudioClip(title, file, colorClass, patientId = null) {
                 ...extraFields
             }]);
             if (error) throw error;
+            logAdminAction('create', 'audio_clip', title);
             await loadAudioClips();
             return;
         } catch (e) {
@@ -3882,6 +4355,7 @@ async function updateAudioClip(clip, title, file, colorClass) {
         if (file) update.audio_url = await uploadToSupabaseStorage('media_uploads', 'audio-clips', file);
         const { error } = await supabaseClient.from('audio_clips').update(update).eq('id', clip.rawId);
         if (error) throw error;
+        logAdminAction('update', 'audio_clip', title);
         await loadAudioClips();
         return;
     }
@@ -3904,6 +4378,7 @@ async function deleteAudioClip(clip) {
     if (!confirm('Apagar este áudio?')) return;
     if (clip.fromSupabase && supabaseClient) {
         await supabaseClient.from('audio_clips').delete().eq('id', clip.rawId);
+        logAdminAction('delete', 'audio_clip', clip.title);
     } else {
         await new Promise((resolve) => {
             db.transaction(['audios'], 'readwrite').objectStore('audios').delete(clip.rawId).onsuccess = resolve;
@@ -3942,7 +4417,8 @@ function renderAudioClipsGrid() {
             + (compareModeOn && index === compareSlotB ? ' compare-slot-b' : '');
         card.textContent = clip.title;
         card.addEventListener('click', () => {
-            if (compareModeOn) assignCompareSlot(index); else selectAudioClip(index, true);
+            // Tocar no card só seleciona: o áudio começa apenas no play.
+            if (compareModeOn) assignCompareSlot(index); else selectAudioClip(index, false);
         });
 
         if (isDoctor && activePatientContext && clip.fromSupabase) {
@@ -4087,35 +4563,43 @@ function seekAudioToFraction(fraction) {
 // Decodifica o áudio real (Web Audio API) e reduz a onda a ~220 picos de
 // amplitude máxima por bloco — é a forma de onda de verdade do arquivo, não
 // uma decoração aleatória, porque o pedido era poder "analisar" o áudio.
+// Compartilhado pelo módulo de Áudios (decodeAudioPeaks) e pelo player de
+// Leitura de Texto (decodeReadingTextPeaks) — mesmo algoritmo, cache à parte
+// em cada um porque as chaves são de naturezas diferentes (id do clipe vs.
+// data URL do TTS).
+async function computeWaveformPeaks(url) {
+    const response = await fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const channelData = audioBuffer.getChannelData(0);
+    const peakCount = 220;
+    const blockSize = Math.max(1, Math.floor(channelData.length / peakCount));
+    const peaks = [];
+    for (let i = 0; i < peakCount; i++) {
+        const start = i * blockSize;
+        let max = 0;
+        for (let j = 0; j < blockSize && (start + j) < channelData.length; j++) {
+            const abs = Math.abs(channelData[start + j]);
+            if (abs > max) max = abs;
+        }
+        peaks.push(max);
+    }
+    ctx.close();
+    // Normaliza pelo pico mais alto da própria gravação — sem isso, um
+    // áudio gravado/sintetizado num volume mais baixo (a maioria não chega a
+    // 1.0 de amplitude) desenha barras pequenas no meio do canvas, com
+    // espaço em branco sobrando em cima/embaixo em vez de usar a altura toda.
+    const maxPeak = Math.max(...peaks, 0.0001);
+    return peaks.map(p => p / maxPeak);
+}
+
 async function decodeAudioPeaks(clip) {
     if (audioPeaksCache.has(clip.id)) return audioPeaksCache.get(clip.id);
     try {
-        const response = await fetch(clip.url);
-        const arrayBuffer = await response.arrayBuffer();
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-        const channelData = audioBuffer.getChannelData(0);
-        const peakCount = 220;
-        const blockSize = Math.max(1, Math.floor(channelData.length / peakCount));
-        const peaks = [];
-        for (let i = 0; i < peakCount; i++) {
-            const start = i * blockSize;
-            let max = 0;
-            for (let j = 0; j < blockSize && (start + j) < channelData.length; j++) {
-                const abs = Math.abs(channelData[start + j]);
-                if (abs > max) max = abs;
-            }
-            peaks.push(max);
-        }
-        ctx.close();
-        // Normaliza pelo pico mais alto da própria gravação — sem isso, um
-        // áudio gravado num volume mais baixo (a maioria não chega a 1.0 de
-        // amplitude) desenha barras pequenas no meio do canvas, com espaço
-        // em branco sobrando em cima/embaixo em vez de usar a altura toda.
-        const maxPeak = Math.max(...peaks, 0.0001);
-        const normalizedPeaks = peaks.map(p => p / maxPeak);
-        audioPeaksCache.set(clip.id, normalizedPeaks);
-        return normalizedPeaks;
+        const peaks = await computeWaveformPeaks(clip.url);
+        audioPeaksCache.set(clip.id, peaks);
+        return peaks;
     } catch (e) {
         console.warn('Não foi possível decodificar a forma de onda:', e);
         return [];
@@ -4259,7 +4743,7 @@ async function saveRecordingLocally(blob) {
                 const newRawId = e.target.result;
                 loadAudioClips().then(() => {
                     const idx = currentAudioClips.findIndex(c => c.rawId === newRawId && !c.fromSupabase);
-                    if (idx !== -1) selectAudioClip(idx, true);
+                    if (idx !== -1) selectAudioClip(idx, false);
                     resolve();
                 });
             };
@@ -4295,8 +4779,9 @@ function setupAudioModuleControls() {
         }
         if (audioPlayerEl.paused) audioPlayerEl.play(); else audioPlayerEl.pause();
     });
-    document.getElementById('btn-audio-prev').addEventListener('click', () => goToAdjacentAudioClip(-1, true));
-    document.getElementById('btn-audio-next').addEventListener('click', () => goToAdjacentAudioClip(1, true));
+    // Anterior/próximo só continuam tocando se o áudio já estava tocando.
+    document.getElementById('btn-audio-prev').addEventListener('click', () => goToAdjacentAudioClip(-1, !audioPlayerEl.paused));
+    document.getElementById('btn-audio-next').addEventListener('click', () => goToAdjacentAudioClip(1, !audioPlayerEl.paused));
     document.getElementById('btn-audio-shuffle').addEventListener('click', (e) => {
         audioShuffleOn = !audioShuffleOn;
         e.currentTarget.classList.toggle('active', audioShuffleOn);
@@ -4406,12 +4891,13 @@ function setupAudioModuleControls() {
     audioPlayerEl.addEventListener('play', () => setAudioPlayButtonIcon(true));
     audioPlayerEl.addEventListener('pause', () => setAudioPlayButtonIcon(false));
     audioPlayerEl.addEventListener('ended', () => {
-        // Ao terminar, só repete o clipe atual se "repetir" estiver ligado —
-        // nunca avança pro próximo card sozinho; isso só acontece por clique
-        // explícito (card da grade ou botões prev/next).
-        if (audioRepeatOn) {
+        // Sem "repetir" ligado, o áudio para ao terminar — nada começa sozinho.
+        if (!audioRepeatOn) return;
+        if (audioClipOrder.length === 1) {
             audioPlayerEl.currentTime = 0;
             audioPlayerEl.play();
+        } else {
+            goToAdjacentAudioClip(1, true);
         }
     });
 
@@ -4430,6 +4916,8 @@ let currentAudio = null;
 let currentPlaylistItems = [];
 let currentPlaylistIndex = 0;
 let currentPlaylistDeckStyle = null;
+// false quando o exercício desativou os pictogramas automáticos (ARASAAC).
+let currentPlaylistAutoPictograms = true;
 
 function createExerciseBlockHtml(blockId, isEdit = false, hasOldImage = false) {
     return `
@@ -4448,7 +4936,7 @@ function createExerciseBlockHtml(blockId, isEdit = false, hasOldImage = false) {
                     <input type="color" class="item-color" value="#333333" style="width: 100%; height: 40px; cursor: pointer; border: 1px solid #ddd; border-radius: 8px;">
                 </div>
                 <div class="form-group" style="flex: 1; margin-bottom: 0;">
-                    <label>Tamanho (px)</label>
+                    <label>Tamanho do Texto (px)</label>
                     <input type="number" class="item-size" value="100" min="20" max="300" style="width: 100%; height: 40px; box-sizing: border-box; padding: 0 10px; border: 1px solid #ddd; border-radius: 8px;">
                 </div>
             </div>
@@ -4680,7 +5168,7 @@ function openEditAudioExercise(ex) {
     const colorClass = parts[1] || 'pink';
 
     document.getElementById('audio-exercise-title').value = displayTitle;
-    document.getElementById('audio-exercise-color').value = colorClass;
+    setCardColorPickerValue('audio-exercise-color-picker', 'audio-exercise-color', 'audio-exercise-color-custom', colorClass);
     document.getElementById('audio-text-size').value = ex.syllablesSize || '100';
     document.getElementById('audio-text-color').value = ex.syllablesColor || '#1f1f1f';
     document.getElementById('audio-font').value = ex.syllablesFont || "'Outfit', sans-serif";
@@ -4744,7 +5232,8 @@ function openEditExercise(ex) {
     const colorClass = parts[1] || 'pink';
     
     document.getElementById('exercise-title').value = displayTitle;
-    document.getElementById('exercise-color').value = colorClass;
+    setCardColorPickerValue('exercise-color-picker', 'exercise-color', 'exercise-color-custom', colorClass);
+    document.getElementById('exercise-auto-pictograms').checked = ex.autoPictograms !== false;
 
     const companyGroup = document.getElementById('exercise-target-company-group');
     if (companyGroup) {
@@ -4790,7 +5279,7 @@ function openEditSyllablesExercise(ex) {
     const colorClass = parts[1] || 'pink';
 
     document.getElementById('syllables-exercise-title').value = displayTitle;
-    document.getElementById('syllables-exercise-color').value = colorClass;
+    setCardColorPickerValue('syllables-exercise-color-picker', 'syllables-exercise-color', 'syllables-exercise-color-custom', colorClass);
     document.getElementById('syllables-text-size').value = ex.syllablesSize || '100';
     document.getElementById('syllables-text-color').value = ex.syllablesColor || '#1f1f1f';
     document.getElementById('syllables-font').value = ex.syllablesFont || "'Outfit', sans-serif";
@@ -4855,6 +5344,10 @@ function setupModals() {
         } else {
             openManagerMessage();
         }
+    });
+
+    document.getElementById('btn-manage-monte-frase')?.addEventListener('click', () => {
+        document.getElementById('monte-frase-frame')?.contentWindow?.postMessage({ type: 'monte-frase:open-manager' }, window.location.origin);
     });
 
     document.getElementById('btn-memory-new-game').addEventListener('click', async () => {
@@ -4988,6 +5481,30 @@ function setupModals() {
     });
     document.getElementById('btn-naming-stop').addEventListener('click', () => closeGame());
 
+    document.getElementById('numbers-keypad')?.addEventListener('click', (e) => {
+        const digitBtn = e.target.closest('.numbers-key[data-digit]');
+        if (digitBtn) numbersPressDigit(digitBtn.dataset.digit);
+    });
+    document.getElementById('btn-numbers-backspace')?.addEventListener('click', numbersBackspace);
+    document.getElementById('btn-numbers-enter')?.addEventListener('click', numbersEnter);
+
+    // Teclado físico (0-9, Backspace, Enter) além do teclado na tela — vale tanto
+    // pro teclado de um computador quanto pro de um celular/tablet com teclado
+    // bluetooth conectado, já que os dois disparam o mesmo evento 'keydown'.
+    document.addEventListener('keydown', (e) => {
+        if (!document.getElementById('view-numeric-keyboard')?.classList.contains('active')) return;
+        if (e.key >= '0' && e.key <= '9') {
+            e.preventDefault();
+            numbersPressDigit(e.key);
+        } else if (e.key === 'Backspace') {
+            e.preventDefault();
+            numbersBackspace();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            numbersEnter();
+        }
+    });
+
     document.getElementById('btn-speech-naming-record')?.addEventListener('click', toggleSpeechNamingRecording);
     document.getElementById('btn-speech-naming-help')?.addEventListener('click', speechNamingHelp);
     document.getElementById('btn-speech-naming-skip')?.addEventListener('click', speechNamingSkip);
@@ -5041,30 +5558,6 @@ function setupModals() {
         } finally {
             saveBtn.disabled = false;
             saveBtn.textContent = originalText;
-        }
-    });
-
-    document.getElementById('numbers-keypad')?.addEventListener('click', (e) => {
-        const digitBtn = e.target.closest('.numbers-key[data-digit]');
-        if (digitBtn) numbersPressDigit(digitBtn.dataset.digit);
-    });
-    document.getElementById('btn-numbers-backspace')?.addEventListener('click', numbersBackspace);
-    document.getElementById('btn-numbers-enter')?.addEventListener('click', numbersEnter);
-
-    // Teclado físico (0-9, Backspace, Enter) além do teclado na tela — vale tanto
-    // pro teclado de um computador quanto pro de um celular/tablet com teclado
-    // bluetooth conectado, já que os dois disparam o mesmo evento 'keydown'.
-    document.addEventListener('keydown', (e) => {
-        if (!document.getElementById('view-numeric-keyboard')?.classList.contains('active')) return;
-        if (e.key >= '0' && e.key <= '9') {
-            e.preventDefault();
-            numbersPressDigit(e.key);
-        } else if (e.key === 'Backspace') {
-            e.preventDefault();
-            numbersBackspace();
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            numbersEnter();
         }
     });
 
@@ -5324,6 +5817,7 @@ function setupModals() {
         document.getElementById('upload-exercise-modal').style.display = 'flex';
         document.getElementById('upload-exercise-modal').querySelector('h2').textContent = "Novo Exercício (Slides)";
         document.getElementById('upload-exercise-form').reset();
+        setCardColorPickerValue('exercise-color-picker', 'exercise-color', 'exercise-color-custom', 'pink');
 
         const companyGroup = document.getElementById('exercise-target-company-group');
         if (companyGroup) {
@@ -5504,7 +5998,8 @@ function setupModals() {
 
         const targetDoctorUserId = isDoctor ? currentUserId : null;
         const targetCompanyId = isAdmin ? (document.getElementById('exercise-target-company')?.value || null) : null;
-        saveExercisePlaylistToDB(finalTitle, itemsArray, targetDoctorUserId, targetCompanyId);
+        const autoPictograms = document.getElementById('exercise-auto-pictograms').checked;
+        saveExercisePlaylistToDB(finalTitle, itemsArray, targetDoctorUserId, targetCompanyId, autoPictograms);
         closeExerciseUpload();
     });
 
@@ -5517,6 +6012,7 @@ function setupModals() {
         document.getElementById('syllables-exercise-modal').style.display = 'flex';
         document.getElementById('syllables-exercise-modal').querySelector('h2').textContent = "Novo Exercício (Sílabas)";
         document.getElementById('syllables-exercise-form').reset();
+        setCardColorPickerValue('syllables-exercise-color-picker', 'syllables-exercise-color', 'syllables-exercise-color-custom', 'pink');
 
         const companyGroup = document.getElementById('syllables-exercise-target-company-group');
         if (companyGroup) {
@@ -5587,6 +6083,7 @@ function setupModals() {
         document.getElementById('audio-exercise-modal').style.display = 'flex';
         document.getElementById('audio-exercise-modal').querySelector('h2').textContent = "Novo Exercício (Áudio Real)";
         document.getElementById('audio-exercise-form').reset();
+        setCardColorPickerValue('audio-exercise-color-picker', 'audio-exercise-color', 'audio-exercise-color-custom', 'pink');
 
         const audioCompanyGroup = document.getElementById('audio-exercise-target-company-group');
         if (audioCompanyGroup) {
@@ -5666,6 +6163,7 @@ function setupModals() {
         document.getElementById('reading-text-exercise-modal').style.display = 'flex';
         document.getElementById('reading-text-exercise-modal').querySelector('h2').textContent = "Novo Exercício (Leitura de Texto)";
         document.getElementById('reading-text-exercise-form').reset();
+        setCardColorPickerValue('reading-text-exercise-color-picker', 'reading-text-exercise-color', 'reading-text-exercise-color-custom', 'pink');
         document.getElementById('reading-text-phrases-container').innerHTML = '';
         readingTextPhraseBlockCounter = 0;
 
@@ -5715,14 +6213,63 @@ function setupModals() {
         document.getElementById('reading-text-player-modal').style.display = 'none';
         if (currentAudio) { currentAudio.pause(); currentAudio = null; }
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-        setReadingTextButtonPlaying(document.getElementById('btn-play-reading-text'), false);
+        setReadingTextButtonState(document.getElementById('btn-play-reading-text'), 'idle');
         readingTextActiveButton = null;
+        resetReadingTextProgress();
     });
 
     document.getElementById('btn-play-reading-text').addEventListener('click', (e) => {
         const text = document.getElementById('reading-text-player-body').dataset.text || '';
         toggleReadingTextPlayback(text, e.currentTarget, 'Ouviu leitura de texto');
     });
+
+    document.getElementById('reading-text-speed')?.addEventListener('change', (e) => {
+        prefetchReadingTextAudio(readingTextOpenTexts, e.target.value);
+    });
+
+    // Clique/arraste na onda pula pro ponto tocado; setas quando ela está
+    // focada fazem o mesmo em passos pequenos; o botão volta 5s — tudo opera
+    // sobre currentAudio, que é sempre o único áudio tocando.
+    (() => {
+        const canvas = document.getElementById('reading-text-waveform-canvas');
+        const rewindBtn = document.getElementById('btn-reading-text-rewind');
+        if (!canvas || !rewindBtn) return;
+
+        const seekToClientX = (clientX) => {
+            if (!currentAudio || !currentAudio.duration) return;
+            const rect = canvas.getBoundingClientRect();
+            const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+            currentAudio.currentTime = ratio * currentAudio.duration;
+        };
+
+        let dragging = false;
+        const startDrag = (e) => { dragging = true; seekToClientX(e.touches ? e.touches[0].clientX : e.clientX); };
+        const dragMove = (e) => { if (dragging) seekToClientX(e.touches ? e.touches[0].clientX : e.clientX); };
+        const endDrag = () => { dragging = false; };
+
+        canvas.addEventListener('mousedown', startDrag);
+        canvas.addEventListener('touchstart', startDrag);
+        window.addEventListener('mousemove', dragMove);
+        window.addEventListener('touchmove', dragMove);
+        window.addEventListener('mouseup', endDrag);
+        window.addEventListener('touchend', endDrag);
+
+        canvas.addEventListener('keydown', (e) => {
+            if (!currentAudio) return;
+            if (e.key === 'ArrowRight') {
+                currentAudio.currentTime = Math.min(currentAudio.duration || 0, currentAudio.currentTime + 5);
+                e.preventDefault();
+            } else if (e.key === 'ArrowLeft') {
+                currentAudio.currentTime = Math.max(0, currentAudio.currentTime - 5);
+                e.preventDefault();
+            }
+        });
+
+        rewindBtn.addEventListener('click', () => {
+            if (!currentAudio) return;
+            currentAudio.currentTime = Math.max(0, currentAudio.currentTime - 5);
+        });
+    })();
 
     document.getElementById('btn-close-video').addEventListener('click', () => {
         document.getElementById('video-modal').style.display = 'none';
@@ -5823,6 +6370,7 @@ function openPresentationPlaylist(ex) {
     currentPlaylistDeckStyle = (ex.gameKind === 'syllables' || ex.gameKind === 'audio-real')
         ? { size: ex.syllablesSize, color: ex.syllablesColor, font: ex.syllablesFont }
         : null;
+    currentPlaylistAutoPictograms = ex.autoPictograms !== false;
 
     document.getElementById('presentation-modal').style.display = 'flex';
     const activityLabel = (ex.title || '').split('|')[0] || ex.title || 'Exercício';
@@ -5937,13 +6485,17 @@ function renderCurrentPlaylistItem() {
                 // ARASAAC acha nada pra essa palavra.
                 imgEl.style.display = 'none';
                 imgEl.src = '';
-                fetchArasaacImage(item.imgQuery || item.word).then(url => {
-                    if (currentPlaylistItems[currentPlaylistIndex] !== item) return;
-                    if (url) {
-                        imgEl.src = url;
-                        imgEl.style.display = '';
-                    }
-                });
+                // Exercício com pictogramas automáticos desativados: fica só
+                // com a palavra (e a legenda de sílabas, se houver).
+                if (currentPlaylistAutoPictograms) {
+                    fetchArasaacImage(item.imgQuery || item.word).then(url => {
+                        if (currentPlaylistItems[currentPlaylistIndex] !== item) return;
+                        if (url) {
+                            imgEl.src = url;
+                            imgEl.style.display = '';
+                        }
+                    });
+                }
             }
 
             // Exercício com Slides: sílabas (se preenchidas) viram legenda
@@ -5952,7 +6504,7 @@ function renderCurrentPlaylistItem() {
                 captionEl.style.display = 'inline-block';
                 // Mesmo tamanho da palavra escrita à esquerda — só encolhe
                 // (fitTextToWidth) se não couber na largura disponível.
-                captionEl.style.fontSize = ((item.textSize || item.size || 100) * 0.7) + 'px';
+                captionEl.style.fontSize = (item.textSize || item.size || 100) + 'px';
                 captionEl.innerHTML = sanitizeWordHtml(displaySyllables);
                 // Reset explícito (ver comentário equivalente no ramo de cima):
                 // captionEl é reaproveitado entre slides.
@@ -5999,7 +6551,7 @@ function renderCurrentPlaylistItem() {
             if (neighbor.image_url) {
                 const preloader = new Image();
                 preloader.src = neighbor.image_url;
-            } else if (!(neighbor.imageBlob instanceof Blob)) {
+            } else if (!(neighbor.imageBlob instanceof Blob) && currentPlaylistAutoPictograms) {
                 // Sem imagem própria: o slide busca um pictograma automático no
                 // ARASAAC (serviço externo) na hora de exibir — chamando aqui
                 // adiantado, a busca já cai no arasaacCache, e ainda
@@ -6035,6 +6587,7 @@ const gamesList = [
 
 const exerciseActivities = [
     { id: 'complete-sentence', title: 'Complete a Frase', icon: 'fa-puzzle-piece', styleClass: 'border-orange' },
+    { id: 'monte-frase', title: 'Monte a Frase', icon: 'fa-chalkboard', styleClass: 'border-blue' },
     { id: 'naming', title: 'Reconhecimento de Palavras', icon: 'fa-images', styleClass: 'border-red' },
     { id: 'afasia', title: 'Reconhecimento de Imagem', icon: 'fa-comment-medical', styleClass: 'border-yellow' }
 ];
@@ -6080,8 +6633,39 @@ function setLocalGameFlag(gameId, visible) {
     localStorage.setItem(GAME_FLAGS_LOCAL_KEY, JSON.stringify(flags));
 }
 
+// Atividades que nascem OCULTAS e só aparecem pra médicos/pacientes depois
+// que o admin publica pelo botão de visibilidade do card (as outras seguem o
+// padrão antigo: visíveis até alguém ocultar). Pra estas, o servidor manda:
+// o cache em localStorage só vale sem sessão (demonstração local) ou se a
+// consulta falhar — senão um aparelho que guardou "oculto" nunca veria o
+// admin publicar depois.
+const OPT_IN_GAME_IDS = new Set(['monte-frase']);
+const OPT_IN_VISIBILITY_TTL_MS = 30000;
+const optInVisibilityCache = new Map();
+
+async function getOptInGameVisibility(gameId) {
+    // Cede a vez antes de ler currentUserId: ele é declarado mais abaixo no
+    // arquivo, e a primeira renderização dos cards pode ser disparada antes.
+    await Promise.resolve();
+    if (supabaseClient && currentUserId) {
+        const cached = optInVisibilityCache.get(gameId);
+        if (cached && Date.now() - cached.at < OPT_IN_VISIBILITY_TTL_MS) return cached.visible;
+        try {
+            const { data, error } = await supabaseClient.from('game_flags').select('visible').eq('game_id', gameId).maybeSingle();
+            if (!error) {
+                const visible = data?.visible === true;
+                optInVisibilityCache.set(gameId, { visible, at: Date.now() });
+                setLocalGameFlag(gameId, visible);
+                return visible;
+            }
+        } catch (e) {}
+    }
+    return getLocalGameFlags()[gameId] === true;
+}
+
 async function getGameVisibility(gameId) {
     if (gameId === 'complete-sentence' && isCompleteSentenceLocalDemo()) return true;
+    if (OPT_IN_GAME_IDS.has(gameId)) return getOptInGameVisibility(gameId);
     const localFlags = getLocalGameFlags();
     if (localFlags[gameId] !== undefined) {
         return localFlags[gameId] !== false;
@@ -6101,6 +6685,7 @@ async function getGameVisibility(gameId) {
 async function toggleGameVisibility(gameId, currentVisible) {
     const newVisible = !currentVisible;
     setLocalGameFlag(gameId, newVisible);
+    optInVisibilityCache.set(gameId, { visible: newVisible, at: Date.now() });
     if (supabaseClient) {
         try {
             await supabaseClient.from('game_flags').upsert({ game_id: gameId, visible: newVisible });
@@ -6310,6 +6895,14 @@ async function renderActivityCards(container, activities, isCurrent = () => true
             if (baseSeedKey && !hasReleasedGameContent(baseSeedKey)) continue;
         }
 
+        // Monte a Frase: quem não é admin nem médico só vê o card se o médico
+        // liberou o container pra ele em "Meus Pacientes" — a RLS só devolve
+        // o container liberado, então basta ele existir na lista. Não exige
+        // frases cadastradas (diferente dos jogos acima): o exercício já vem
+        // com frases prontas.
+        if (game.id === 'monte-frase' && !isAdmin && !isDoctor
+            && !lastMergedExercises.some(ex => isGameContainerSeedKey(ex.seedKey, MONTE_FRASE_SEED_KEY))) continue;
+
         const btn = document.createElement('button');
         btn.className = `word-btn ${game.styleClass}` + (isAdmin && !isVisible ? ' card-hidden' : '');
 
@@ -6457,6 +7050,15 @@ function openGame(gameId) {
         const frame = document.getElementById('complete-sentence-frame');
         container.style.display = 'flex';
         if (!frame.src) refreshCompleteSentenceFrameSrc();
+    } else if (gameId === 'monte-frase') {
+        // Mesmo esquema do Complete a Frase: página própria num iframe. O
+        // acesso e o tempo de uso são contados aqui fora, pelo
+        // startUsageActivity logo abaixo, como em qualquer outro exercício.
+        const frame = document.getElementById('monte-frase-frame');
+        document.getElementById('game-monte-frase-container').style.display = 'flex';
+        // ?sb=staging acompanha o app, como em buildCompleteSentenceFrameUrl.
+        const stagingParam = (typeof useStagingSupabase !== 'undefined' && useStagingSupabase) ? '&sb=staging' : '';
+        if (!frame.src) frame.src = frame.dataset.src + stagingParam;
     } else if (gameId === 'speech-naming') {
         document.getElementById('game-speech-naming-container').style.display = 'flex';
         startSpeechNamingGame();
@@ -6545,6 +7147,9 @@ function closeGame() {
     const elCompleteSentence = document.getElementById('game-complete-sentence-container');
     if (elCompleteSentence) elCompleteSentence.style.display = 'none';
 
+    const elMonteFrase = document.getElementById('game-monte-frase-container');
+    if (elMonteFrase) elMonteFrase.style.display = 'none';
+
     const elStrengths = document.getElementById('game-strengths-board-container');
     if (elStrengths) elStrengths.style.display = 'none';
 
@@ -6552,7 +7157,8 @@ function closeGame() {
     if (elJogo2) elJogo2.style.display = 'none';
 
     document.getElementById('complete-sentence-frame')?.contentWindow?.postMessage({ type: 'complete-sentence:pause-audio' }, window.location.origin);
-    
+    document.getElementById('monte-frase-frame')?.contentWindow?.postMessage({ type: 'monte-frase:pause-audio' }, window.location.origin);
+
     // Resetar jogos ao fechar
     if (typeof showJogo2Setup === 'function') {
         showJogo2Setup();
@@ -8182,7 +8788,7 @@ function showJogo2Setup() {
 
     // Renderiza os cards de adversários e aplica o selecionado ao jogador 2
     renderJogo2OpponentCards();
-    const opps = loadJogo2Opponents();
+    const opps = JOGO2_OPPONENTS_FIXED;
     const selIdx = getSelectedOpponentIndex();
     if (opps[selIdx]) {
         jogo2Players[1].name = opps[selIdx].name || `Adversário ${selIdx + 1}`;
@@ -11104,6 +11710,11 @@ const COMPLETE_FRASE_SEED_KEY = 'complete-frase-container';
 // existir aqui também porque openPatientExercisesModal (fora do iframe)
 // cria esse container pelo mesmo padrão de getOrCreateGameContainer.
 const COMPLETE_FRASE_TITLE = 'Complete a Frase|orange';
+// Container do Monte a Frase — mesmo esquema do Complete a Frase: as frases
+// são gerenciadas de dentro do iframe (monte-frase.js, que repete estes dois
+// valores), e a linha em `exercises` é o que o médico libera por paciente.
+const MONTE_FRASE_SEED_KEY = 'monte-frase-container';
+const MONTE_FRASE_TITLE = 'Monte a Frase|blue';
 
 function makeNamingSetId() {
     return 'naming-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
@@ -12357,6 +12968,7 @@ if (supabaseClient) {
                 renderGamesList();
                 const adminNavBtn = document.getElementById('btn-nav-admin');
                 if (adminNavBtn) adminNavBtn.style.display = 'flex';
+                restoreLastActiveView();
                 return;
             }
             // Ninguém pode acessar sem login! Redireciona para a landing page (index.html).
@@ -12445,6 +13057,7 @@ if (supabaseClient) {
             }
 
             applyModuleVisibility(); // Aplica visibilidade de módulos (para ambos admin e usuário)
+            restoreLastActiveView();
         } catch (e) {
             console.error("Erro ao checar permissões:", e);
         }
@@ -12749,6 +13362,15 @@ async function loadAdminUsers() {
             passBtn.addEventListener('click', () => openChangePasswordModal(u.id, u.email));
             actionsCell.appendChild(passBtn);
 
+            if (u.role === 'doctor') {
+                const activityBtn = document.createElement('button');
+                activityBtn.className = 'admin-edit-password-btn';
+                activityBtn.innerHTML = '<i class="fas fa-magnifying-glass" aria-hidden="true"></i>';
+                activityBtn.title = 'Ver atividade (ações e acessos)';
+                activityBtn.addEventListener('click', () => openDoctorActivityModal(u.id, u.name || u.email));
+                actionsCell.appendChild(activityBtn);
+            }
+
             if (!isSelf) {
                 // Remoção de conta = desativar (ban), nunca apagar de
                 // verdade (regra fixa do projeto) — excluir de verdade
@@ -12788,6 +13410,263 @@ async function loadAdminUsers() {
     renderUsageDashboard();
 }
 
+// Modal "Atividade do médico" (aba Usuários → botão de lupa numa linha de
+// médico): junta admin_action_log (o que ele criou/editou/excluiu/liberou)
+// e usage_sessions (quando entrou, quanto tempo ficou) — só o admin abre
+// isso (RLS de admin_action_log só libera select pra is_admin()).
+const ADMIN_ACTION_LABELS = { create: 'Criou', update: 'Editou', delete: 'Excluiu', release: 'Liberou', unrelease: 'Bloqueou' };
+const ADMIN_ENTITY_LABELS = {
+    exercise: 'exercício', patient: 'paciente', media: 'mídia', audio_clip: 'áudio',
+    book: 'livro', module: 'módulo', topic: 'tópico', virtue: 'força', carometro_sector: 'setor do Carômetro'
+};
+
+function setDoctorActivityTab(tabName) {
+    ['actions', 'access'].forEach(tab => {
+        document.getElementById(`btn-doctor-activity-tab-${tab}`)?.classList.toggle('active', tab === tabName);
+        document.getElementById(`doctor-activity-${tab}-panel`)?.classList.toggle('active', tab === tabName);
+    });
+}
+
+function formatAdminDateTime(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function formatSessionDuration(seconds) {
+    if (!seconds) return '0min';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}h${String(m).padStart(2, '0')}` : `${m}min`;
+}
+
+// showActor: liga o e-mail do médico na linha — necessário na aba Logs (que
+// pode listar vários médicos de uma vez), redundante no modal de atividade
+// de UM médico só (openDoctorActivityModal), onde fica desligado.
+function renderDoctorActionRow(a, showActor = false) {
+    const row = document.createElement('div');
+    row.className = 'usage-item';
+    const main = document.createElement('div');
+    const strong = document.createElement('strong');
+    const entityLabel = ADMIN_ENTITY_LABELS[a.entity_type] || a.entity_type;
+    strong.textContent = `${ADMIN_ACTION_LABELS[a.action] || a.action} ${entityLabel}` + (a.entity_label ? `: ${a.entity_label}` : '');
+    main.appendChild(strong);
+    const detailParts = [];
+    if (showActor) detailParts.push(a.actor_email);
+    if (a.detail) detailParts.push(a.detail);
+    if (detailParts.length) {
+        const span = document.createElement('span');
+        span.textContent = detailParts.join(' — ');
+        main.appendChild(span);
+    }
+    const meta = document.createElement('span');
+    meta.className = 'usage-meta';
+    meta.textContent = formatAdminDateTime(a.created_at);
+    row.append(main, meta);
+    return row;
+}
+
+function renderDoctorSessionRow(s) {
+    const row = document.createElement('div');
+    row.className = 'usage-item';
+    const main = document.createElement('div');
+    const strong = document.createElement('strong');
+    strong.textContent = `Entrou em ${formatAdminDateTime(s.start_at)}`;
+    main.appendChild(strong);
+    const span = document.createElement('span');
+    span.textContent = s.status === 'active' ? 'Sessão em andamento' : (s.end_at ? `Saiu em ${formatAdminDateTime(s.end_at)}` : 'Encerrada');
+    main.appendChild(span);
+    const meta = document.createElement('span');
+    meta.className = 'usage-meta';
+    meta.textContent = formatSessionDuration(s.active_seconds);
+    row.append(main, meta);
+    return row;
+}
+
+async function openDoctorActivityModal(doctorId, doctorLabel) {
+    if (!supabaseClient) return;
+    document.getElementById('doctor-activity-modal').style.display = 'flex';
+    document.getElementById('doctor-activity-subtitle').textContent = doctorLabel;
+    setDoctorActivityTab('actions');
+
+    const actionsList = document.getElementById('doctor-activity-actions-list');
+    const accessList = document.getElementById('doctor-activity-access-list');
+    actionsList.textContent = 'Carregando...';
+    accessList.textContent = 'Carregando...';
+
+    const [{ data: actions, error: actionsErr }, { data: sessions, error: sessionsErr }] = await Promise.all([
+        supabaseClient.from('admin_action_log').select('*').eq('actor_user_id', doctorId)
+            .order('created_at', { ascending: false }).limit(200),
+        supabaseClient.from('usage_sessions').select('*').eq('user_id', doctorId)
+            .order('start_at', { ascending: false }).limit(100)
+    ]);
+
+    actionsList.innerHTML = '';
+    if (actionsErr) {
+        actionsList.innerHTML = `<p class="media-hint">Erro ao carregar ações: ${actionsErr.message}</p>`;
+    } else if (!actions || !actions.length) {
+        actionsList.innerHTML = '<p class="media-hint">Nenhuma ação registrada ainda.</p>';
+    } else {
+        actions.forEach(a => actionsList.appendChild(renderDoctorActionRow(a)));
+    }
+
+    accessList.innerHTML = '';
+    if (sessionsErr) {
+        accessList.innerHTML = `<p class="media-hint">Erro ao carregar sessões: ${sessionsErr.message}</p>`;
+    } else if (!sessions || !sessions.length) {
+        accessList.innerHTML = '<p class="media-hint">Nenhuma sessão registrada ainda.</p>';
+    } else {
+        sessions.forEach(s => accessList.appendChild(renderDoctorSessionRow(s)));
+    }
+}
+
+document.getElementById('btn-doctor-activity-tab-actions')?.addEventListener('click', () => setDoctorActivityTab('actions'));
+document.getElementById('btn-doctor-activity-tab-access')?.addEventListener('click', () => setDoctorActivityTab('access'));
+document.getElementById('btn-close-doctor-activity')?.addEventListener('click', () => {
+    document.getElementById('doctor-activity-modal').style.display = 'none';
+});
+
+// Aba "Logs" (Admin): mesma tabela admin_action_log do modal de atividade,
+// mas filtrável por empresa e/ou médico em vez de escopada a um médico só —
+// pensada pra dar uma visão geral, não só investigar um médico específico.
+let adminLogsCompanyFilter = '';
+let adminLogsDoctorFilter = '';
+let adminLogsDoctorsCache = []; // médicos (todos, ou só da empresa filtrada) pro <select>
+let adminLogsCurrentData = []; // última página carregada — o botão "Baixar CSV" exporta exatamente isso, sem reconsultar
+
+function populateAdminLogsCompanyFilter() {
+    const select = document.getElementById('admin-logs-company-filter');
+    if (!select) return;
+    const current = adminLogsCompanyFilter;
+    select.innerHTML = '<option value="">Todas as empresas</option>'
+        + companiesCache.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    if (current && companiesCache.some(c => c.id === current)) select.value = current;
+    else adminLogsCompanyFilter = '';
+}
+
+async function populateAdminLogsDoctorFilter() {
+    const select = document.getElementById('admin-logs-doctor-filter');
+    if (!select) return;
+    try {
+        const { users } = await callAdminUsersFn('list');
+        adminLogsDoctorsCache = (users || [])
+            .filter(u => u.role === 'doctor' && (!adminLogsCompanyFilter || u.companyId === adminLogsCompanyFilter))
+            .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+    } catch (e) {
+        adminLogsDoctorsCache = [];
+    }
+    const current = adminLogsDoctorFilter;
+    select.innerHTML = '<option value="">Todos os médicos</option>'
+        + adminLogsDoctorsCache.map(d => `<option value="${d.id}">${d.name || d.email}</option>`).join('');
+    if (current && adminLogsDoctorsCache.some(d => d.id === current)) select.value = current;
+    else adminLogsDoctorFilter = '';
+}
+
+async function loadAdminLogsList() {
+    const list = document.getElementById('admin-logs-list');
+    if (!list || !supabaseClient) return;
+    list.textContent = 'Carregando...';
+
+    // created_at é timestamptz — "De" entra a partir de 00:00 do dia local,
+    // "Até" cobre o dia inteiro (< o dia seguinte), senão um filtro "até
+    // hoje" excluiria as ações de hoje mesmo (comparando contra 00:00 de hoje).
+    const dateFrom = document.getElementById('admin-logs-date-from')?.value;
+    const dateTo = document.getElementById('admin-logs-date-to')?.value;
+
+    let query = supabaseClient.from('admin_action_log').select('*')
+        .order('created_at', { ascending: false }).limit(300);
+    if (adminLogsDoctorFilter) query = query.eq('actor_user_id', adminLogsDoctorFilter);
+    else if (adminLogsCompanyFilter) query = query.eq('company_id', adminLogsCompanyFilter);
+    if (dateFrom) query = query.gte('created_at', new Date(dateFrom + 'T00:00:00').toISOString());
+    if (dateTo) {
+        const nextDay = new Date(dateTo + 'T00:00:00');
+        nextDay.setDate(nextDay.getDate() + 1);
+        query = query.lt('created_at', nextDay.toISOString());
+    }
+
+    const { data: actions, error } = await query;
+    adminLogsCurrentData = actions || [];
+    list.innerHTML = '';
+    if (error) {
+        list.innerHTML = `<p class="media-hint">Erro ao carregar logs: ${error.message}</p>`;
+    } else if (!actions || !actions.length) {
+        list.innerHTML = '<p class="media-hint">Nenhuma ação registrada ainda pra esse filtro.</p>';
+    } else {
+        actions.forEach(a => list.appendChild(renderDoctorActionRow(a, true)));
+    }
+}
+
+function csvEscapeValue(value) {
+    const text = value === null || value === undefined ? '' : String(value);
+    if (/[;"\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+    return text;
+}
+
+// Exporta exatamente o que está na tela (adminLogsCurrentData, preenchido
+// pela última chamada de loadAdminLogsList) — mesmos filtros de
+// empresa/médico/data já aplicados, sem precisar reconsultar o banco.
+function downloadAdminLogsCsv() {
+    if (!adminLogsCurrentData.length) {
+        alert('Nenhum log pra baixar com esse filtro.');
+        return;
+    }
+    // admin_action_log só grava o e-mail do médico (actor_email), não o nome
+    // — cruza com adminLogsDoctorsCache (já carregado pro <select>) pra
+    // mostrar o nome quando der; sem correspondência, cai pro e-mail mesmo.
+    const doctorNameById = new Map(adminLogsDoctorsCache.map(d => [d.id, d.name]));
+    const header = ['Data', 'Médico', 'E-mail', 'Ação', 'Tipo', 'Item', 'Detalhe'];
+    const rows = adminLogsCurrentData.map(a => [
+        formatAdminDateTime(a.created_at),
+        doctorNameById.get(a.actor_user_id) || a.actor_email,
+        a.actor_email,
+        ADMIN_ACTION_LABELS[a.action] || a.action,
+        ADMIN_ENTITY_LABELS[a.entity_type] || a.entity_type,
+        a.entity_label || '',
+        a.detail || ''
+    ]);
+    const csvContent = "﻿" + [header, ...rows].map(row => row.map(csvEscapeValue).join(';')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const today = new Date().toISOString().slice(0, 10);
+    link.download = `logs_medicos_${today}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+async function loadAdminLogsPanel() {
+    if (!companiesCache.length) {
+        try {
+            const { companies } = await callAdminUsersFn('listCompanies');
+            companiesCache = companies || [];
+        } catch (e) {}
+    }
+    populateAdminLogsCompanyFilter();
+    await populateAdminLogsDoctorFilter();
+    await loadAdminLogsList();
+}
+
+document.getElementById('admin-logs-company-filter')?.addEventListener('change', async (e) => {
+    adminLogsCompanyFilter = e.target.value;
+    adminLogsDoctorFilter = ''; // troca de empresa invalida o médico selecionado (pode ser de outra)
+    await populateAdminLogsDoctorFilter();
+    await loadAdminLogsList();
+});
+document.getElementById('admin-logs-doctor-filter')?.addEventListener('change', (e) => {
+    adminLogsDoctorFilter = e.target.value;
+    loadAdminLogsList();
+});
+document.getElementById('admin-logs-date-from')?.addEventListener('change', () => loadAdminLogsList());
+document.getElementById('admin-logs-date-to')?.addEventListener('change', () => loadAdminLogsList());
+document.getElementById('btn-admin-logs-clear-dates')?.addEventListener('click', () => {
+    document.getElementById('admin-logs-date-from').value = '';
+    document.getElementById('admin-logs-date-to').value = '';
+    loadAdminLogsList();
+});
+document.getElementById('btn-admin-logs-download')?.addEventListener('click', downloadAdminLogsCsv);
+
 document.getElementById('btn-nav-admin')?.addEventListener('click', async () => {
     setAdminTab('users');
     await loadAdminUsers();
@@ -12800,6 +13679,7 @@ document.getElementById('btn-admin-tab-users')?.addEventListener('click', () => 
 document.getElementById('btn-admin-tab-companies')?.addEventListener('click', () => setAdminTab('companies'));
 document.getElementById('btn-admin-tab-usage')?.addEventListener('click', () => setAdminTab('usage'));
 document.getElementById('btn-admin-tab-modules')?.addEventListener('click', () => setAdminTab('modules'));
+document.getElementById('btn-admin-tab-logs')?.addEventListener('click', () => setAdminTab('logs'));
 
 document.getElementById('btn-doctor-tab-patients')?.addEventListener('click', () => setDoctorTab('patients'));
 document.getElementById('btn-doctor-tab-usage')?.addEventListener('click', () => setDoctorTab('usage'));
@@ -13028,6 +13908,7 @@ async function loadDoctorPatients() {
                 if (!newPassword) return;
                 try {
                     await callDoctorPatientsFn('setPassword', { patientId: p.id, userId: p.userId, password: newPassword });
+                    logAdminAction('update', 'patient', p.name || p.email, 'Redefiniu a senha');
                     showDoctorPatientsFeedback('Senha atualizada.');
                 } catch (err) {
                     showDoctorPatientsFeedback(err.message, true);
@@ -13047,6 +13928,7 @@ async function loadDoctorPatients() {
                 if (!confirm(confirmMsg)) return;
                 try {
                     await callDoctorPatientsFn('setActive', { patientId: p.id, userId: p.userId, active: !p.active });
+                    logAdminAction('update', 'patient', p.name || p.email, p.active ? 'Desativou o paciente' : 'Reativou o paciente');
                     showDoctorPatientsFeedback(p.active ? 'Paciente desativado.' : 'Paciente reativado.');
                     loadDoctorPatients();
                 } catch (err) {
@@ -13197,6 +14079,7 @@ async function openPatientModulesModal(patient) {
             try {
                 await supabaseClient.from('patient_module_flags')
                     .upsert({ patient_id: patient.id, module_id: mod.id, visible: newVisible, updated_at: new Date().toISOString() });
+                logAdminAction(newVisible ? 'release' : 'unrelease', 'module', mod.name, `Paciente: ${patient.name || patient.email}`);
                 openPatientModulesModal(patient); // recarrega a lista com o novo estado
             } catch (err) {
                 showDoctorPatientsFeedback('Erro ao salvar módulo: ' + err.message, true);
@@ -13245,6 +14128,10 @@ async function openPatientExercisesModal(patient) {
     const activityPlaceholders = [
         { baseSeedKey: COMPLETE_FRASE_SEED_KEY, title: COMPLETE_FRASE_TITLE },
     ];
+    // Monte a Frase só entra na lista de liberação depois que o admin
+    // publicou a atividade; antes disso o médico nem a enxerga.
+    const monteFrasePublished = isAdmin || await getGameVisibility('monte-frase');
+    if (monteFrasePublished) activityPlaceholders.push({ baseSeedKey: MONTE_FRASE_SEED_KEY, title: MONTE_FRASE_TITLE });
     // Container já pode existir como global (admin cadastrou direto) OU como
     // banco do próprio médico — nos dois casos já tem uma linha de verdade
     // na lista, não precisa do placeholder virtual (evita duplicar a mesma
@@ -13254,7 +14141,8 @@ async function openPatientExercisesModal(patient) {
         .filter(p => !existingSeedKeys.has(p.baseSeedKey) && !existingSeedKeys.has(doctorScopedSeedKey(p.baseSeedKey, currentUserId)))
         .map(p => ({ id: null, title: p.title, doctor_user_id: currentUserId, baseSeedKey: p.baseSeedKey }));
 
-    const allEntries = [...(myExercises || []), ...virtualEntries];
+    const allEntries = [...(myExercises || []), ...virtualEntries]
+        .filter(ex => monteFrasePublished || !isGameContainerSeedKey(ex.seedKey || ex.seed_key, MONTE_FRASE_SEED_KEY));
 
     list.innerHTML = '';
     if (!allEntries.length) {
@@ -13299,6 +14187,7 @@ async function openPatientExercisesModal(patient) {
                 const { error: upsertErr } = await supabaseClient.from('patient_exercise_flags')
                     .upsert({ patient_id: patient.id, exercise_id: exerciseId, visible: newVisible, updated_at: new Date().toISOString() });
                 if (upsertErr) throw upsertErr;
+                logAdminAction(newVisible ? 'release' : 'unrelease', 'exercise', displayTitle, `Paciente: ${patient.name || patient.email}`);
                 // Recarrega com o novo estado, mas preservando a rolagem — a
                 // lista pode ter dezenas de itens, e sem isso cada clique
                 // jogava a tela de volta pro topo, obrigando a rolar até
@@ -13369,6 +14258,7 @@ async function openPatientTopicsModal(patient) {
             try {
                 await supabaseClient.from('patient_topic_flags')
                     .upsert({ patient_id: patient.id, topic_id: topic.id, visible: newVisible, updated_at: new Date().toISOString() });
+                logAdminAction(newVisible ? 'release' : 'unrelease', 'topic', topicLabel, `Paciente: ${patient.name || patient.email}`);
                 openPatientTopicsModal(patient); // recarrega com o novo estado
             } catch (err) {
                 showDoctorPatientsFeedback('Erro ao liberar tópico: ' + err.message, true);
@@ -13434,6 +14324,7 @@ async function openPatientVirtuesModal(patient) {
             try {
                 await supabaseClient.from('patient_virtue_flags')
                     .upsert({ patient_id: patient.id, virtue_id: virtue.id, visible: newVisible, updated_at: new Date().toISOString() });
+                logAdminAction(newVisible ? 'release' : 'unrelease', 'virtue', virtueLabel, `Paciente: ${patient.name || patient.email}`);
                 openPatientVirtuesModal(patient);
             } catch (err) {
                 showDoctorPatientsFeedback('Erro ao liberar categoria: ' + err.message, true);
@@ -13502,6 +14393,7 @@ async function openPatientMediasModal(patient) {
             try {
                 await supabaseClient.from('patient_media_flags')
                     .upsert({ patient_id: patient.id, media_id: media.id, visible: newVisible, updated_at: new Date().toISOString() });
+                logAdminAction(newVisible ? 'release' : 'unrelease', 'media', media.title, `Paciente: ${patient.name || patient.email}`);
                 openPatientMediasModal(patient);
             } catch (err) {
                 showDoctorPatientsFeedback('Erro ao liberar mídia: ' + err.message, true);
@@ -13571,6 +14463,7 @@ async function openPatientAudioModal(patient) {
             try {
                 await supabaseClient.from('patient_audio_flags')
                     .upsert({ patient_id: patient.id, audio_id: clip.id, visible: newVisible, updated_at: new Date().toISOString() });
+                logAdminAction(newVisible ? 'release' : 'unrelease', 'audio_clip', displayTitle, `Paciente: ${patient.name || patient.email}`);
                 openPatientAudioModal(patient);
             } catch (err) {
                 showDoctorPatientsFeedback('Erro ao liberar áudio: ' + err.message, true);
@@ -13597,18 +14490,27 @@ document.getElementById('btn-close-patient-audio')?.addEventListener('click', ()
 const patientBooksModal = document.getElementById('patient-books-modal');
 let patientBooksModalPatient = null;
 
+function bookFormatBadge(book) {
+    const isPdf = book.mime_type?.includes('pdf');
+    const badge = document.createElement('span');
+    badge.textContent = isPdf ? 'PDF' : 'EPUB';
+    badge.style.cssText = `font-size:11px; font-weight:bold; padding:2px 6px; border-radius:4px; ${isPdf ? 'background:#ffe3e3; color:#c0392b;' : 'background:#e3f2ff; color:#1565c0;'}`;
+    return badge;
+}
+
 async function openPatientBooksModal(patient) {
     patientBooksModalPatient = patient;
     document.getElementById('patient-books-subtitle').textContent = patient.name || patient.email;
     const list = document.getElementById('patient-books-list');
-    const addSelect = document.getElementById('patient-books-add-select');
+    const addList = document.getElementById('patient-books-add-list');
+    const addBtn = document.getElementById('patient-books-add-btn');
     list.innerHTML = 'Carregando...';
-    addSelect.innerHTML = '';
+    addList.innerHTML = '';
     if (patientBooksModal) patientBooksModal.style.display = 'flex';
 
     // Inclui o banco do médico E o conteúdo global do admin.
     const { data: myBooks } = await supabaseClient
-        .from('books').select('id, title, doctor_user_id')
+        .from('books').select('id, title, doctor_user_id, mime_type')
         .or(doctorBankOrFilter())
         .order('title');
     const { data: overrides } = await supabaseClient
@@ -13630,8 +14532,11 @@ async function openPatientBooksModal(patient) {
             const row = document.createElement('div');
             row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#f5f5f5; border-radius:8px;';
 
+            const leftSide = document.createElement('div');
+            leftSide.style.cssText = 'display:flex; align-items:center; gap:8px;';
             const label = document.createElement('span');
             label.textContent = title;
+            leftSide.append(bookFormatBadge(book), label);
 
             const removeBtn = document.createElement('button');
             removeBtn.type = 'button';
@@ -13643,49 +14548,59 @@ async function openPatientBooksModal(patient) {
                 try {
                     await supabaseClient.from('patient_book_flags')
                         .upsert({ patient_id: patient.id, book_id: book.id, visible: false, updated_at: new Date().toISOString() });
+                    logAdminAction('unrelease', 'book', title, `Paciente: ${patient.name || patient.email}`);
                     openPatientBooksModal(patient);
                 } catch (err) {
                     showDoctorPatientsFeedback('Erro ao remover livro: ' + err.message, true);
                 }
             });
 
-            row.append(label, removeBtn);
+            row.append(leftSide, removeBtn);
             list.appendChild(row);
         });
     }
 
     if (!availableBooks.length) {
-        const opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = 'Nenhum livro disponível pra adicionar';
-        addSelect.appendChild(opt);
-        addSelect.disabled = true;
+        addList.innerHTML = '<p class="media-hint">Nenhum livro disponível pra adicionar.</p>';
+        addBtn.disabled = true;
     } else {
-        addSelect.disabled = false;
-        const placeholder = document.createElement('option');
-        placeholder.value = '';
-        placeholder.textContent = 'Selecione um livro...';
-        addSelect.appendChild(placeholder);
+        addBtn.disabled = false;
         availableBooks.forEach(book => {
             const isGlobal = !book.doctor_user_id;
-            const opt = document.createElement('option');
-            opt.value = book.id;
-            opt.textContent = book.title + (isGlobal ? ' (do admin)' : '');
-            addSelect.appendChild(opt);
+            const title = book.title + (isGlobal ? ' (do admin)' : '');
+
+            const label = document.createElement('label');
+            label.style.cssText = 'display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer;';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'patient-books-add-checkbox';
+            checkbox.value = book.id;
+            checkbox.dataset.title = title;
+
+            const span = document.createElement('span');
+            span.textContent = title;
+
+            label.append(checkbox, bookFormatBadge(book), span);
+            addList.appendChild(label);
         });
     }
 }
 
 document.getElementById('patient-books-add-btn')?.addEventListener('click', async () => {
-    const addSelect = document.getElementById('patient-books-add-select');
-    const bookId = addSelect?.value;
-    if (!bookId || !patientBooksModalPatient) return;
+    if (!patientBooksModalPatient) return;
+    const checked = Array.from(document.querySelectorAll('.patient-books-add-checkbox:checked'));
+    if (!checked.length) return;
+    const now = new Date().toISOString();
+    const rows = checked.map(cb => ({
+        patient_id: patientBooksModalPatient.id, book_id: cb.value, visible: true, updated_at: now
+    }));
     try {
-        await supabaseClient.from('patient_book_flags')
-            .upsert({ patient_id: patientBooksModalPatient.id, book_id: bookId, visible: true, updated_at: new Date().toISOString() });
+        await supabaseClient.from('patient_book_flags').upsert(rows);
+        checked.forEach(cb => logAdminAction('release', 'book', cb.dataset.title, `Paciente: ${patientBooksModalPatient.name || patientBooksModalPatient.email}`));
         openPatientBooksModal(patientBooksModalPatient);
     } catch (err) {
-        showDoctorPatientsFeedback('Erro ao liberar livro: ' + err.message, true);
+        showDoctorPatientsFeedback('Erro ao liberar livros: ' + err.message, true);
     }
 });
 
@@ -13739,6 +14654,7 @@ async function openPatientCarometroModal(patient) {
             try {
                 await supabaseClient.from('patient_carometro_flags')
                     .upsert({ patient_id: patient.id, sector_id: sector.id, visible: newVisible, updated_at: new Date().toISOString() });
+                logAdminAction(newVisible ? 'release' : 'unrelease', 'carometro_sector', label.textContent, `Paciente: ${patient.name || patient.email}`);
                 openPatientCarometroModal(patient);
             } catch (err) {
                 showDoctorPatientsFeedback('Erro ao liberar setor: ' + err.message, true);
@@ -13907,6 +14823,7 @@ newPatientForm?.addEventListener('submit', async (e) => {
 
     try {
         await callDoctorPatientsFn('create', { email, password, name });
+        logAdminAction('create', 'patient', name || email);
         closeNewPatientModal();
         showDoctorPatientsFeedback(`Paciente ${email} criado.`);
         loadDoctorPatients();
@@ -14059,6 +14976,8 @@ function showEditBars() {
     if (completeSentenceManager) completeSentenceManager.style.display = (isAdmin || isDoctor) ? 'flex' : 'none';
     const completeSentenceNotify = document.getElementById('btn-notify-complete-sentence');
     if (completeSentenceNotify) completeSentenceNotify.style.display = isAdmin ? 'inline-flex' : 'none';
+    const monteFraseManager = document.getElementById('btn-manage-monte-frase');
+    if (monteFraseManager) monteFraseManager.style.display = (isAdmin || isDoctor) ? 'flex' : 'none';
 }
 
 // Mostra "Salvando..." e desabilita os botões de ação enquanto as cartas pendentes

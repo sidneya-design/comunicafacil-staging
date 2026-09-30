@@ -313,6 +313,37 @@ body {
 .word-editor-toolbar input[type="color"].word-editor-color { width: 32px; height: 32px; padding: 2px; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; background: white; }
 .word-editor-toolbar input[type="color"].word-editor-color::-webkit-color-swatch-wrapper { padding: 2px; }
 .word-editor-toolbar input[type="color"].word-editor-color::-webkit-color-swatch { border: none; border-radius: 3px; }
+/* Picker de "Cor do Card" (Exercício de Sílabas): paleta fixa de sempre +
+   input[type=color] nativo pra qualquer outra cor, ver initCardColorPicker. */
+.card-color-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.card-color-swatch { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #ddd; cursor: pointer; padding: 0; flex: none; }
+.card-color-swatch:hover { box-shadow: 0 0 0 1px #999; }
+.card-color-swatch.is-selected { box-shadow: 0 0 0 2px #2196F3; }
+.card-color-picker input[type="color"].card-color-custom { width: 32px; height: 32px; padding: 2px; border: 2px dashed #bbb; box-shadow: none; border-radius: 50%; cursor: pointer; background: white; flex: none; }
+.card-color-picker input[type="color"].card-color-custom::-webkit-color-swatch-wrapper { padding: 2px; border-radius: 50%; }
+.card-color-picker input[type="color"].card-color-custom::-webkit-color-swatch { border: none; border-radius: 50%; }
+.card-color-picker input[type="color"].card-color-custom.is-selected { border-style: solid; border-color: #fff; box-shadow: 0 0 0 2px #2196F3; }
+/* "+" por cima do seletor nativo, sinalizando "outra cor" em vez de mostrar
+   um tom que pode coincidir visualmente com um dos presets ao lado. */
+.card-color-custom-wrap { position: relative; display: inline-flex; flex: none; }
+.card-color-custom-wrap::after {
+    content: '+'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; color: #888; pointer-events: none;
+}
+.card-color-custom-wrap:has(.is-selected)::after { display: none; }
+/* Botão "salvar" (marcador) ao lado do seletor nativo, e as cores que ele
+   salvou (persistidas em localStorage, ver addCustomCardColor). */
+.card-color-save-btn { width: 32px; height: 32px; border-radius: 50%; border: 1px solid #ddd; background: #f5f5f5; color: #666; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; flex: none; padding: 0; }
+.card-color-save-btn:hover { background: #eee; color: #333; }
+.card-color-saved { display: contents; }
+.card-color-swatch-wrap { position: relative; display: inline-flex; flex: none; }
+.card-color-swatch-wrap .card-color-swatch-remove {
+    position: absolute; top: -4px; right: -4px; width: 15px; height: 15px; border-radius: 50%;
+    border: 1px solid #fff; background: #666; color: #fff; font-size: 10px; line-height: 1; padding: 0;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; transition: opacity .15s;
+}
+.card-color-swatch-wrap:hover .card-color-swatch-remove { opacity: 1; }
+.card-color-swatch-remove:hover { background: #d32f2f; }
 .word-editor-field { width: 100%; min-height: 44px; box-sizing: border-box; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; font-family: inherit; outline: none; }
 .word-editor-field:focus { border-color: #2196F3; }
 .word-editor-field:empty:before { content: attr(data-placeholder); color: #999; }
@@ -556,34 +587,16 @@ body {
 .audio-speed-btn { width: auto; min-width: 40px; padding: 0 10px; border-radius: 999px; font-size: 13px; font-weight: bold; }
 .audio-speed-btn.active { color: var(--audio-accent); opacity: 1; }
 
-/* Celular: lado a lado não cabe — empilha grade em cima, player embaixo.
-   Grade ocupa o espaço restante e rola por conta própria; player fica com
-   altura fixa e sempre visível (nunca some rolando junto com a grade). */
+/* Celular: lado a lado não cabe — empilha grade em cima, player embaixo,
+   cada um com sua própria altura fixa (em vez de dividir 480px ao meio). */
 @media (max-width: 768px) {
-    /* overflow:hidden (não mais auto) — quem rola agora é só a grade de
-       cards (flex:1, sua própria barra já vinha de .grid-container); o
-       player fica com altura fixa e nunca sai da tela por rolagem. */
-    .audio-module-layout { flex-direction: column; max-height: none; overflow: hidden; }
-    /* Seletor .audio-module-layout .audio-clips-grid (especificidade maior que
-       .grid-container sozinho) pra não ser sobrescrito pela regra genérica
-       .grid-container do breakpoint mobile mais abaixo no arquivo — mesma
-       especificidade + ordem de origem fariam ela vencer e voltar a grade pro
-       layout de 3 colunas/120px, cortando os cards pequenos de áudio. */
-    .audio-module-layout .audio-clips-grid {
-        flex: 1 1 auto; min-height: 0; width: 100%; height: auto;
-        grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); grid-auto-rows: 75px; gap: 8px; padding: 10px;
-    }
-    .audio-player-panel { flex: 0 0 auto; width: 100%; max-width: 100%; min-width: 0; height: 320px; }
+    .audio-module-layout { flex-direction: column; height: auto; max-height: none; overflow-y: auto; }
+    .audio-clips-grid { flex: none; width: 100%; height: 280px; }
+    .audio-player-panel { flex: none; width: 100%; max-width: 100%; min-width: 0; height: 320px; }
     .audio-controls-bar { gap: 8px; padding: 12px; }
     .audio-control-btn { width: 36px; height: 36px; font-size: 16px; }
     .audio-control-btn-play { width: 48px; height: 48px; font-size: 18px; }
     .audio-speed-btn { width: auto; min-width: 36px; height: 36px; padding: 0 8px; font-size: 12px; }
-    /* "Adicionar Áudio" é fluxo de upload de arquivo — no celular a prática é
-       gravar a própria voz (botão de microfone no player), então o cabeçalho
-       inteiro (botão + dica) só ocupa espaço à toa nessa tela. !important
-       necessário: showEditBars() seta display inline ('flex') pra
-       médico/admin, que sempre vence uma regra normal de CSS. */
-    #audio-upload-header { display: none !important; }
 }
 
 /* PAINEL ADMIN (gestão de usuários) */
@@ -1531,7 +1544,7 @@ button, .action-btn { touch-action: manipulation; }
 .complete-sentence-game-title strong { font-size: 1rem; color: #29243b; }
 .complete-sentence-game-title small { margin-top: 3px; color: #777083; font-size: .76rem; }
 .complete-sentence-game-icon { display: grid; place-items: center; width: 38px; height: 38px; color: #6a4fd0; background: #eee9ff; border-radius: 12px; }
-#complete-sentence-frame { width: 100%; min-height: 0; flex: 1; background: #f8f7fc; border: 0; border-radius: var(--radius); }
+#complete-sentence-frame, #monte-frase-frame { width: 100%; min-height: 0; flex: 1; background: #f8f7fc; border: 0; border-radius: var(--radius); }
 
 @media (max-width: 700px) {
     .complete-sentence-game-title small { display: none; }

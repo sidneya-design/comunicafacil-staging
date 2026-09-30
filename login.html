@@ -425,7 +425,7 @@
         const supabaseKey = useStagingSupabase
             ? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlxaWlpbGRkb2R0dHZyeG9kd2JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNjg4NjEsImV4cCI6MjEwMTk0NDg2MX0.Po7_bLntUw-RFt92Lw2WIsrJoasrrg1VBWl7zm1vDSM'
             : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWJtdnlraW5kdmlscHRqaG1hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0ODE2OTksImV4cCI6MjA5ODA1NzY5OX0.4eKcRhUReuaKaaq4ftIOWe6vvB9qxL4Sjiii-3QX5eM';
-        // O app.html cacheia áudio de TTS no localStorage sem limite (chaves comunica_tts_v1:/v2:),
+        // O app.html cacheia áudio de TTS no localStorage (chaves comunica_tts_*),
         // o que pode estourar a quota do navegador com o tempo. Se isso acontecer, um setItem comum
         // do SDK falha ao persistir o token de sessão após o login, e o usuário cai num loop
         // (login funciona, mas a sessão nunca fica salva, então volta pra tela de login). Ao estourar,
@@ -435,7 +435,7 @@
                 const keysToRemove = [];
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
-                    if (key && (key.startsWith('comunica_tts_v1:') || key.startsWith('comunica_tts_v2:'))) {
+                    if (key && key.startsWith('comunica_tts_')) {
                         keysToRemove.push(key);
                     }
                 }
@@ -523,6 +523,19 @@
             showStatus('Defina uma nova senha para concluir a recuperação.', false);
         }
 
+        // signOut da primeira carga pós-reabrir o navegador. O submit espera ele
+        // terminar: com internet ruim ele podia concluir DEPOIS do login e apagar
+        // a sessão recém-criada, mandando o usuário de volta pro início.
+        let pendingFreshLaunchSignOut = Promise.resolve();
+
+        // O SDK guarda a sessão no localStorage com esta chave. Se o navegador não
+        // deixar gravar (quota cheia, dados do site bloqueados), o app.html não acha
+        // a sessão e o usuário entra em loop — melhor avisar aqui do que redirecionar.
+        const authStorageKey = `sb-${new URL(supabaseUrl).hostname.split('.')[0]}-auth-token`;
+        function isSessionPersisted() {
+            try { return !!localStorage.getItem(authStorageKey); } catch (e) { return false; }
+        }
+
         // Redireciona se já estiver logado
         async function checkSession() {
             if (isRecoveryLink) {
@@ -536,7 +549,8 @@
                 // token no servidor — não pode travar esperando resposta
                 // numa clínica com internet ruim. Sem sessão, fica na tela
                 // de login mesmo, exigindo login de novo.
-                await supabaseClient.auth.signOut({ scope: 'local' }).catch(() => {});
+                pendingFreshLaunchSignOut = supabaseClient.auth.signOut({ scope: 'local' }).catch(() => {});
+                await pendingFreshLaunchSignOut;
                 return;
             }
 
@@ -613,6 +627,8 @@
                     return;
                 }
 
+                await pendingFreshLaunchSignOut;
+
                 const { data, error } = await supabaseClient.auth.signInWithPassword({
                     email,
                     password
@@ -621,6 +637,14 @@
                 if (error) throw error;
 
                 if (data?.session) {
+                    if (!isSessionPersisted()) {
+                        // Última tentativa: libera todo o cache de áudio e grava de novo.
+                        evictTtsLocalStorageCache();
+                        try { localStorage.setItem(authStorageKey, JSON.stringify(data.session)); } catch (e) { /* segue pro aviso */ }
+                    }
+                    if (!isSessionPersisted()) {
+                        throw new Error('Seu navegador não está deixando salvar o login. Limpe os dados deste site (cadeado ao lado do endereço → Configurações do site → Limpar dados) ou desative extensões que bloqueiam armazenamento, e tente de novo.');
+                    }
                     window.location.href = appRedirectUrl;
                 }
             } catch (err) {

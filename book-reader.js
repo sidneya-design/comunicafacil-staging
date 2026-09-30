@@ -1,6 +1,6 @@
 // book-reader.js — ComunicaFácil Netflix-Style Library Module
 
-import { supabase } from './supabase.js?v=3';
+import { supabase } from './supabase.js?v=4';
 
 // ── Config ──────────────────────────────────────────────
 const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 MB
@@ -45,6 +45,7 @@ supabase.auth.onAuthStateChange((event) => {
 // clicar, com um alert — confuso pro médico entender por que não conseguia
 // mexer num livro alheio da biblioteca geral.
 let currentUserId = null;
+let currentUserEmail = null;
 let isEditorOrAdmin = false;
 let currentUserCompanyId = null;
 let currentUserInfoLoaded = false;
@@ -52,6 +53,7 @@ async function ensureCurrentUserInfo() {
   if (currentUserInfoLoaded) return;
   const { data: { user } } = await supabase.auth.getUser();
   currentUserId = user?.id || null;
+  currentUserEmail = user?.email || null;
   if (currentUserId) {
     const { data } = await supabase.rpc('is_editor_or_admin');
     isEditorOrAdmin = data === true;
@@ -62,6 +64,25 @@ async function ensureCurrentUserInfo() {
     currentUserCompanyId = memberRow?.company_id || null;
   }
   currentUserInfoLoaded = true;
+}
+
+// Mesmo log de auditoria pro admin de app.js (aba Empresas → médico) —
+// duplicado aqui porque book-reader.html roda num iframe à parte, sem
+// acesso às globais de app.js. Só médicos de verdade gravam (não
+// editor/admin) — mesma régua de isEditorOrAdmin usada pro resto da tela.
+function logAdminAction(action, entityType, entityLabel, detail = null) {
+  if (!currentUserId || isEditorOrAdmin) return;
+  supabase.from('admin_action_log').insert([{
+    actor_user_id: currentUserId,
+    actor_email: currentUserEmail || 'sem e-mail',
+    company_id: currentUserCompanyId,
+    action,
+    entity_type: entityType,
+    entity_label: entityLabel || null,
+    detail
+  }]).then(({ error }) => {
+    if (error) console.warn('Erro ao salvar log de ação admin:', error);
+  });
 }
 
 // ── Helpers ────────────────────────────────────────────────
@@ -107,7 +128,7 @@ function saveCustomGenres(list) {
       const keysToRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
-        if (key && (key.startsWith('comunica_tts_v1:') || key.startsWith('comunica_tts_v2:'))) keysToRemove.push(key);
+        if (key && key.startsWith('comunica_tts_')) keysToRemove.push(key);
       }
       keysToRemove.forEach(k => localStorage.removeItem(k));
       localStorage.setItem(CUSTOM_GENRES_KEY, JSON.stringify(list));
@@ -377,6 +398,7 @@ async function uploadFile(file) {
     });
 
     if (dbErr) return setStatus('❌ Erro ao salvar: ' + dbErr.message, 'error');
+    logAdminAction('create', 'book', title);
 
     setStatus('✅ Livro adicionado com sucesso!', 'success');
     setTimeout(() => {
@@ -513,6 +535,7 @@ async function deleteBook(book) {
     alert('Não foi possível excluir (sessão sem permissão). Tente sair e entrar de novo.');
     return;
   }
+  logAdminAction('delete', 'book', title);
 
   const filePath = (book.file_path || '').replace(/^\/+/, '');
   const coverPath = deriveCoverPath(book.file_path);

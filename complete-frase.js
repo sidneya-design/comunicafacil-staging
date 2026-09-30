@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js?v=3';
+import { supabase } from './supabase.js?v=4';
 
 // Escondido por padrão; só reaparece se applyManagerAccessGuard() (mais
 // abaixo) confirmar que quem está logado é admin. Some antes de qualquer
@@ -313,7 +313,7 @@ function getTtsAudio(text) {
                 const keysToRemove = [];
                 for (let i = 0; i < localStorage.length; i++) {
                     const key = localStorage.key(i);
-                    if (key && key.startsWith(TTS_STORAGE_PREFIX)) keysToRemove.push(key);
+                    if (key && key.startsWith('comunica_tts_')) keysToRemove.push(key);
                 }
                 keysToRemove.forEach(k => localStorage.removeItem(k));
                 localStorage.setItem(TTS_STORAGE_PREFIX + normalizedText, audioBase64);
@@ -853,7 +853,7 @@ function saveCustomQuestions() {
             const keysToRemove = [];
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
-                if (key && key.startsWith(TTS_STORAGE_PREFIX)) keysToRemove.push(key);
+                if (key && key.startsWith('comunica_tts_')) keysToRemove.push(key);
             }
             keysToRemove.forEach(k => localStorage.removeItem(k));
             localStorage.setItem(CUSTOM_QUESTIONS_KEY, JSON.stringify(customQuestions));

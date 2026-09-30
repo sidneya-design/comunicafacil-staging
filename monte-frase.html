@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f7f5ff">
+    <title>Monte a Frase | Comunica Fácil</title>
+    <link rel="icon" href="img/icones/icone2.png">
+    <link rel="stylesheet" href="vendor/fonts/outfit.css">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
+    <link rel="stylesheet" href="complete-frase.css">
+    <link rel="stylesheet" href="monte-frase.css">
+</head>
+
+<body>
+    <div class="page-glow glow-one" aria-hidden="true"></div>
+    <div class="page-glow glow-two" aria-hidden="true"></div>
+
+    <main class="activity-shell">
+        <header class="activity-header">
+            <a class="back-link" href="index.html" aria-label="Voltar para o início">
+                <i class="fas fa-arrow-left" aria-hidden="true"></i>
+            </a>
+            <div class="brand-block">
+                <img src="img/icones/icone2.png" alt="">
+                <div>
+                    <span>Comunica Fácil · protótipo</span>
+                    <strong>Monte a frase</strong>
+                </div>
+            </div>
+            <button class="manage-button" id="open-manager" type="button" hidden>
+                <i class="fas fa-sliders" aria-hidden="true"></i>
+                <span>Gerenciar frases</span>
+            </button>
+            <a class="manage-button" id="mode-link" href="monte-frase.html?modo=quadro">
+                <i class="fas fa-chalkboard" aria-hidden="true"></i>
+                <span>Modo quadro</span>
+            </a>
+            <button class="sound-toggle" id="sound-toggle" type="button" aria-pressed="true">
+                <i class="fas fa-volume-high" aria-hidden="true"></i>
+                <span>Som ligado</span>
+            </button>
+        </header>
+
+        <section class="intro-row" aria-labelledby="activity-title">
+            <div>
+                <p class="eyebrow"><i class="fas fa-hand-pointer" aria-hidden="true"></i> Toque ou arraste</p>
+                <h1 id="activity-title">Monte a frase e depois fale</h1>
+                <p class="intro-copy">Faça no seu ritmo. Não há limite de tempo.</p>
+            </div>
+            <div class="score-card" aria-label="Pontuação da atividade">
+                <div><span>Montadas</span><strong id="score-value">0</strong></div>
+                <div class="score-divider"></div>
+                <div><span>Frase</span><strong id="round-value">1/6</strong></div>
+            </div>
+        </section>
+
+        <nav class="level-picker" aria-label="Escolha o nível">
+            <button class="level-button active" type="button" data-level="1" aria-pressed="true">
+                <span>1</span><strong>Curtas</strong><small>3 a 4 palavras</small>
+            </button>
+            <button class="level-button" type="button" data-level="2" aria-pressed="false">
+                <span>2</span><strong>Médias</strong><small>5 palavras</small>
+            </button>
+            <button class="level-button" type="button" data-level="3" aria-pressed="false">
+                <span>3</span><strong>Longas</strong><small>6 a 7 palavras</small>
+            </button>
+        </nav>
+
+        <section class="summary-card" id="access-card" role="status" aria-live="polite">
+            <p class="access-message" id="access-message"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Carregando...</p>
+        </section>
+
+        <section class="exercise-card" id="exercise-card" hidden aria-labelledby="instruction-text">
+            <div class="exercise-topline">
+                <p class="instruction" id="instruction-text">Coloque as palavras na ordem certa.</p>
+                <button class="listen-button" id="listen-prompt" type="button">
+                    <i class="fas fa-volume-high" aria-hidden="true"></i>
+                    Ouvir frase
+                </button>
+            </div>
+
+            <div class="board-top" id="board-top" hidden>
+                <span id="board-timer" aria-label="Tempo">0:00</span>
+                <span aria-label="Frases montadas"><i class="fas fa-check" aria-hidden="true"></i> <b id="board-score">0</b></span>
+            </div>
+
+            <div class="visual-clue" id="visual-clue" aria-hidden="true"></div>
+            <div class="sentence-area" id="sentence-area" aria-label="Frase para montar"></div>
+
+            <div class="feedback" id="feedback" role="status" aria-live="polite">
+                <i class="fas fa-circle-info" aria-hidden="true"></i>
+                <span>Toque em uma palavra para colocá-la na frase.</span>
+            </div>
+
+            <div class="options-label">
+                <span>Palavras</span>
+                <small id="selection-hint"></small>
+            </div>
+            <div class="word-bank" id="word-bank" aria-label="Palavras embaralhadas"></div>
+
+            <section class="speech-panel" id="speech-panel" hidden aria-labelledby="speech-title">
+                <h2 id="speech-title"><i class="fas fa-microphone" aria-hidden="true"></i> Agora fale a frase</h2>
+                <p class="speech-help" id="speech-help">Ouça o modelo, grave a sua voz e compare.</p>
+                <div class="speech-actions">
+                    <button class="speech-button" id="speech-model" type="button">
+                        <i class="fas fa-volume-high" aria-hidden="true"></i> Ouvir modelo
+                    </button>
+                    <button class="speech-button" id="speech-slow" type="button" aria-pressed="false">
+                        <i class="fas fa-gauge-simple" aria-hidden="true"></i> Devagar
+                    </button>
+                    <button class="speech-button record" id="speech-record" type="button">
+                        <i class="fas fa-microphone" aria-hidden="true"></i> <span>Gravar minha voz</span>
+                    </button>
+                    <button class="speech-button" id="speech-mine" type="button" hidden>
+                        <i class="fas fa-play" aria-hidden="true"></i> Ouvir minha voz
+                    </button>
+                </div>
+                <div class="speech-result" id="speech-result" role="status" aria-live="polite" hidden></div>
+                <div class="speech-self" id="speech-self" hidden>
+                    <span>Como ficou?</span>
+                    <button class="speech-button good" id="speech-self-good" type="button">
+                        <i class="fas fa-thumbs-up" aria-hidden="true"></i> Ficou bom
+                    </button>
+                    <button class="speech-button" id="speech-self-retry" type="button">
+                        <i class="fas fa-rotate-left" aria-hidden="true"></i> Quero tentar de novo
+                    </button>
+                </div>
+            </section>
+
+            <div class="exercise-actions">
+                <button class="secondary-button" id="hint-button" type="button">
+                    <i class="fas fa-lightbulb" aria-hidden="true"></i> <span>Preciso de ajuda</span>
+                </button>
+                <div class="board-nav" id="board-nav" hidden>
+                    <button type="button" id="board-prev" aria-label="Frase anterior"><i class="fas fa-caret-left" aria-hidden="true"></i></button>
+                    <strong id="board-position">1 de 10</strong>
+                    <button type="button" id="board-next" aria-label="Próxima frase"><i class="fas fa-caret-right" aria-hidden="true"></i></button>
+                </div>
+                <button class="primary-button" id="next-round" type="button" disabled>
+                    Próxima <i class="fas fa-arrow-right" aria-hidden="true"></i>
+                </button>
+            </div>
+        </section>
+
+        <section class="summary-card" id="summary-card" hidden aria-labelledby="summary-title">
+            <h2 id="summary-title"><i class="fas fa-trophy" aria-hidden="true"></i> Nível concluído</h2>
+            <div class="summary-grid" id="summary-grid"></div>
+            <table class="summary-table">
+                <thead>
+                    <tr><th>Frase</th><th id="summary-errors-heading">Erros</th><th>Pistas</th><th>Fala</th></tr>
+                </thead>
+                <tbody id="summary-rows"></tbody>
+            </table>
+            <p class="summary-note">Este resumo é só desta sessão: nada é salvo no banco neste protótipo.</p>
+            <div class="exercise-actions">
+                <button class="secondary-button" id="summary-restart" type="button">
+                    <i class="fas fa-rotate-left" aria-hidden="true"></i> Repetir nível
+                </button>
+                <button class="primary-button" id="summary-next-level" type="button">
+                    Próximo nível <i class="fas fa-arrow-right" aria-hidden="true"></i>
+                </button>
+            </div>
+        </section>
+
+        <p class="accessibility-note">
+            <i class="fas fa-universal-access" aria-hidden="true"></i>
+            Funciona com mouse, toque e teclado. Tentativas ilimitadas e sem cronômetro.
+        </p>
+    </main>
+
+    <div class="manager-overlay" id="manager-overlay" aria-hidden="true">
+        <aside class="manager-panel" role="dialog" aria-modal="true" aria-labelledby="manager-title">
+            <header class="manager-header">
+                <div>
+                    <p class="manager-kicker"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Conteúdo personalizado</p>
+                    <h2 id="manager-title">Gerenciar frases</h2>
+                    <p id="manager-scope">As frases ficam salvas só neste navegador.</p>
+                </div>
+                <button class="manager-close" id="close-manager" type="button" aria-label="Fechar cadastro">
+                    <i class="fas fa-xmark" aria-hidden="true"></i>
+                </button>
+            </header>
+
+            <div class="manager-body">
+                <section class="manager-form-section" aria-labelledby="new-sentence-title">
+                    <div class="manager-section-heading">
+                        <span class="heading-icon"><i class="fas fa-plus" aria-hidden="true"></i></span>
+                        <div>
+                            <h3 id="new-sentence-title">Nova frase</h3>
+                            <p>Escreva a frase certa; o exercício embaralha sozinho.</p>
+                        </div>
+                    </div>
+
+                    <form id="sentence-form" novalidate>
+                        <label class="field-label">
+                            <span><b class="field-step">1</b> Frase completa</span>
+                            <input id="sentence-text" type="text" placeholder="Ex: Hoje vou almoçar com meu filho." required>
+                            <small>Pelo menos três palavras. Maiúsculas e pontuação aparecem só depois que a frase é montada.</small>
+                        </label>
+
+                        <label class="field-label">
+                            <span><b class="field-step correct">2</b> Outras ordens que também estão certas (opcional)</span>
+                            <textarea id="sentence-alt" rows="3" placeholder="Vou almoçar com meu filho hoje."></textarea>
+                            <small>Uma por linha, com as mesmas palavras da frase.</small>
+                        </label>
+
+                        <label class="field-label">
+                            <span><b class="field-step">3</b> Emoji de apoio (opcional)</span>
+                            <input id="sentence-icon" type="text" maxlength="8" placeholder="Ex: 🍽️">
+                        </label>
+
+                        <div class="form-error" id="form-error" role="alert" aria-live="assertive"></div>
+
+                        <button class="save-question-button" type="submit">
+                            <i class="fas fa-floppy-disk" aria-hidden="true"></i>
+                            <span>Adicionar frase</span>
+                        </button>
+                    </form>
+                </section>
+
+                <section class="question-library" aria-labelledby="library-title">
+                    <div class="manager-section-heading library-heading">
+                        <span class="heading-icon purple"><i class="fas fa-list-check" aria-hidden="true"></i></span>
+                        <div>
+                            <h3 id="library-title">Minhas frases</h3>
+                            <p id="library-help">Entram junto com as frases prontas.</p>
+                        </div>
+                        <span class="question-count" id="sentence-count">0</span>
+                    </div>
+                    <label class="only-custom">
+                        <input type="checkbox" id="only-custom">
+                        <span>Usar só as minhas frases</span>
+                    </label>
+                    <div class="question-list" id="sentence-list"></div>
+                </section>
+            </div>
+        </aside>
+    </div>
+
+    <script src="monte-frase.js?v=1" type="module"></script>
+</body>
+
+</html>

@@ -198,9 +198,9 @@ def tts_route():
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe_route():
-    # Protótipo do jogo "Nomeação por Fala": só transcreve o áudio (sem
-    # passar pelo agente de IA nem gerar resposta em voz), pra comparar a
-    # transcrição com a palavra-alvo do jogo.
+    # Só transcreve o áudio (sem passar pelo agente de IA nem gerar resposta
+    # em voz), pra comparar a transcrição com o alvo do exercício. Usado pelo
+    # protótipo "Nomeação por Fala" (app.js) e pelo "Monte a Frase" (monte-frase.js).
     try:
         if 'audio' not in request.files:
             return jsonify({"error": "Nenhum áudio recebido"}), 400
