@@ -417,6 +417,18 @@ function setFeedback(type, message, icon = "fa-circle-info") {
     feedback.querySelector("span").textContent = message;
 }
 
+// Depois da 1ª pista (ouvir a frase), a mensagem de ajuda sempre traz um
+// botão pra ouvir a frase de novo, ali mesmo onde a pessoa está olhando.
+function addReplayButton() {
+    if (state.hintLevel < 1 || state.completed) return;
+    const replay = document.createElement("button");
+    replay.type = "button";
+    replay.className = "feedback-replay";
+    replay.innerHTML = `<i class="fas fa-rotate-right" aria-hidden="true"></i> Ouvir de novo`;
+    replay.addEventListener("click", () => speak(currentExercise().text, { force: true }));
+    feedback.appendChild(replay);
+}
+
 function updateCounters() {
     const total = levels[state.level].length;
     const score = state.stats.filter(stat => stat?.done).length;
@@ -446,6 +458,7 @@ function checkBoard() {
 function afterBoardMove() {
     state.errors += 1;
     setFeedback("", "Continue até a frase fazer sentido.");
+    addReplayButton();
     checkBoard();
 }
 
@@ -635,11 +648,15 @@ function giveHint() {
     if (state.hintLevel === 1) {
         listenButton.classList.add("visible");
         setFeedback("", "Ouça a frase com atenção.", "fa-volume-high");
+        addReplayButton();
         speak(item.text, { force: true });
     } else {
         const locked = Math.min(state.hintLevel - 1, maxLockedWords());
         lockBoardPrefix(locked);
-        if (!state.completed) setFeedback("", locked === 1 ? "A primeira palavra já está no lugar." : `As ${locked} primeiras palavras já estão no lugar.`, "fa-lightbulb");
+        if (!state.completed) {
+            setFeedback("", locked === 1 ? "A primeira palavra já está no lugar." : `As ${locked} primeiras palavras já estão no lugar.`, "fa-lightbulb");
+            addReplayButton();
+        }
     }
     hintButton.querySelector("span").textContent = "Mais uma pista";
     hintButton.disabled = state.hintLevel - 1 >= maxLockedWords();
