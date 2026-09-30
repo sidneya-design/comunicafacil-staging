@@ -132,8 +132,6 @@ let canManageQuestions = false;
 let isDoctorRole = false;
 let currentUserId = null;
 let currentPatientDoctorUserId = null; // médico do paciente logado, pra achar o container certo na hora de jogar
-let currentUserCompanyId = null; // empresa do médico logado (banco da clínica)
-let currentPatientCompanyId = null; // empresa do paciente logado (banco da clínica)
 
 async function applyManagerAccessGuard() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -149,17 +147,10 @@ async function applyManagerAccessGuard() {
     canManageQuestions = role === "admin" || isDoctorRole;
     if (canManageQuestions) document.getElementById("open-manager")?.style.removeProperty("display");
 
-    if (isDoctorRole) {
-        const { data: memberRow } = await supabase
-            .from("company_members").select("company_id").eq("user_id", session.user.id).maybeSingle();
-        currentUserCompanyId = memberRow?.company_id || null;
-    }
-
     if (role === "patient") {
         const { data: patientRow } = await supabase
-            .from("patients").select("doctor_user_id, company_id").eq("user_id", session.user.id).maybeSingle();
+            .from("patients").select("doctor_user_id").eq("user_id", session.user.id).maybeSingle();
         currentPatientDoctorUserId = patientRow?.doctor_user_id || null;
-        currentPatientCompanyId = patientRow?.company_id || null;
     }
 
     await loadRemoteCustomQuestions();
@@ -187,17 +178,6 @@ function doctorScopedSeedKey(baseSeedKey, doctorUserId) {
     return `${baseSeedKey}:doctor:${doctorUserId}`;
 }
 
-// Banco da clínica (mesma regra de ownGameSeedKey em app.js): todos os
-// médicos da empresa veem e editam as mesmas perguntas — médico novo ou
-// substituto encontra tudo o que os colegas já cadastraram. Médico sem
-// empresa continua com banco próprio.
-function ownCompleteFraseSeedKey() {
-    if (!isDoctorRole) return COMPLETE_FRASE_SEED_KEY;
-    return currentUserCompanyId
-        ? `${COMPLETE_FRASE_SEED_KEY}:company:${currentUserCompanyId}`
-        : doctorScopedSeedKey(COMPLETE_FRASE_SEED_KEY, currentUserId);
-}
-
 let remoteCustomQuestions = []; // entradas vindas do Supabase — nunca somadas em customQuestions/localStorage
 
 function parseCompleteFraseItem(item) {
@@ -223,20 +203,13 @@ async function fetchCompleteFraseContainerItems(seedKey) {
 // getOrCreateGameContainer em app.js, sem o fallback legado por título, que
 // é só pra containers antigos do admin sem seed_key).
 async function getOrCreateOwnCompleteFraseContainer() {
-    const seedKey = ownCompleteFraseSeedKey();
-    const findExisting = async () => (await supabase.from("exercises").select("id").eq("seed_key", seedKey).maybeSingle()).data;
-    const existing = await findExisting();
+    const seedKey = isDoctorRole ? doctorScopedSeedKey(COMPLETE_FRASE_SEED_KEY, currentUserId) : COMPLETE_FRASE_SEED_KEY;
+    const { data: existing } = await supabase.from("exercises").select("id").eq("seed_key", seedKey).maybeSingle();
     if (existing) return existing.id;
     const insertPayload = { title: COMPLETE_FRASE_TITLE, visible: false, seed_key: seedKey };
     if (isDoctorRole) insertPayload.doctor_user_id = currentUserId;
-    if (isDoctorRole && currentUserCompanyId) insertPayload.company_id = currentUserCompanyId;
     const { data: created, error } = await supabase.from("exercises").insert([insertPayload]).select().single();
-    if (error) {
-        // Um colega da clínica pode ter criado o mesmo banco ao mesmo tempo.
-        const again = await findExisting();
-        if (again) return again.id;
-        throw error;
-    }
+    if (error) throw error;
     return created.id;
 }
 
@@ -244,23 +217,14 @@ async function loadRemoteCustomQuestions() {
     try {
         let items = [];
         if (canManageQuestions) {
-            // Autoria: o banco da clínica (médico) ou o global (admin). Enquanto
-            // o da clínica não existir, o banco antigo só do médico aparece.
-            items = await fetchCompleteFraseContainerItems(ownCompleteFraseSeedKey());
-            if (items.length === 0 && isDoctorRole && currentUserCompanyId) {
-                items = await fetchCompleteFraseContainerItems(doctorScopedSeedKey(COMPLETE_FRASE_SEED_KEY, currentUserId));
-            }
-        } else if (currentPatientDoctorUserId || currentPatientCompanyId) {
-            // Paciente jogando: banco da clínica, depois o antigo só do médico;
-            // se nenhum tiver perguntas, cai pro global do admin — o
-            // comportamento de antes preservado por padrão.
-            const keys = [];
-            if (currentPatientCompanyId) keys.push(`${COMPLETE_FRASE_SEED_KEY}:company:${currentPatientCompanyId}`);
-            if (currentPatientDoctorUserId) keys.push(doctorScopedSeedKey(COMPLETE_FRASE_SEED_KEY, currentPatientDoctorUserId));
-            for (const key of keys) {
-                items = await fetchCompleteFraseContainerItems(key);
-                if (items.length) break;
-            }
+            // Autoria: só o próprio container (médico) ou o global (admin).
+            const seedKey = isDoctorRole ? doctorScopedSeedKey(COMPLETE_FRASE_SEED_KEY, currentUserId) : COMPLETE_FRASE_SEED_KEY;
+            items = await fetchCompleteFraseContainerItems(seedKey);
+        } else if (currentPatientDoctorUserId) {
+            // Paciente jogando: tenta o container do próprio médico; se ele
+            // não tiver nada customizado ainda, cai pro global do admin —
+            // exatamente o comportamento de hoje preservado por padrão.
+            items = await fetchCompleteFraseContainerItems(doctorScopedSeedKey(COMPLETE_FRASE_SEED_KEY, currentPatientDoctorUserId));
             if (items.length === 0) items = await fetchCompleteFraseContainerItems(COMPLETE_FRASE_SEED_KEY);
         } else {
             items = await fetchCompleteFraseContainerItems(COMPLETE_FRASE_SEED_KEY);
