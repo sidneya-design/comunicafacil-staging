@@ -26,6 +26,10 @@ body.embedded-mode .speech-panel { margin-top: 14px; padding: 14px; }
 body.embedded-mode .speech-button { min-height: 46px; }
 .level-button:disabled { opacity: .45; cursor: not-allowed; }
 
+.cancel-edit-button { width: 100%; min-height: 44px; margin-top: 8px; color: #625c72; background: #f1eef5; border: 0; border-radius: 13px; cursor: pointer; font-weight: 750; }
+.edit-question { display: grid; place-items: center; width: 32px; height: 32px; flex: 0 0 auto; color: var(--purple-dark); background: var(--purple-soft); border: 0; border-radius: 9px; cursor: pointer; }
+.question-item.editing { border-color: var(--purple); box-shadow: 0 0 0 3px rgba(114, 87, 217, .15); }
+
 .access-message { margin: 0; color: var(--muted); font-size: 1.15rem; font-weight: 650; text-align: center; }
 .access-message i { margin-right: 8px; color: var(--purple); }
 

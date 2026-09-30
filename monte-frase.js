@@ -243,6 +243,21 @@ async function persistNewSentence(entry) {
     custom.sentences.push({ ...entry, id: `remote-${inserted.id}`, remoteItemId: inserted.id });
 }
 
+// Edição mantém a mesma linha (mesmo id): liberações e ordem das frases não mudam.
+async function persistUpdatedSentence(entry, changes) {
+    const updated = { ...entry, ...changes };
+    if (!updated.alt?.length) delete updated.alt;
+    if (!updated.icon) delete updated.icon;
+    if (access.remote) {
+        const { error } = await supabase.from("exercise_items")
+            .update({ word: updated.text, link: JSON.stringify(sentencePayload(updated)) })
+            .eq("id", entry.remoteItemId);
+        if (error) throw error;
+    }
+    custom.sentences = custom.sentences.map(other => (other.id === entry.id ? updated : other));
+    if (!access.remote) saveLocalCustom();
+}
+
 async function persistRemovedSentence(entry) {
     if (access.remote) {
         const { error } = await supabase.from("exercise_items").delete().eq("id", entry.remoteItemId);
@@ -1234,6 +1249,13 @@ function renderSentenceLibrary() {
         const extra = entry.alt?.length ? ` · ${entry.alt.length + 1} ordens aceitas` : "";
         meta.textContent = boardMode ? `${words} palavras${extra}` : `Nível ${levelForSentence(entry.text)} · ${words} palavras${extra}`;
         copy.append(title, meta);
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.className = "edit-question";
+        edit.setAttribute("aria-label", `Editar frase: ${entry.text}`);
+        edit.innerHTML = `<i class="fas fa-pen" aria-hidden="true"></i>`;
+        edit.addEventListener("click", () => startEditing(entry));
+        if (editingId === entry.id) item.classList.add("editing");
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "delete-question";
@@ -1243,13 +1265,14 @@ function renderSentenceLibrary() {
             remove.disabled = true;
             try {
                 await persistRemovedSentence(entry);
+                if (editingId === entry.id) stopEditing();
                 applyCustomChange("Frase excluída.");
             } catch (error) {
                 remove.disabled = false;
                 showToast("Não consegui excluir a frase. Tente de novo.");
             }
         });
-        top.append(icon, copy, remove);
+        top.append(icon, copy, edit, remove);
         item.appendChild(top);
         list.appendChild(item);
     });
@@ -1263,9 +1286,48 @@ function applyCustomChange(message) {
     showToast(message);
 }
 
+// ── Edição de uma frase já cadastrada ─────────────────────────────────────
+// O mesmo formulário serve pra criar e editar: em edição ele vem preenchido,
+// o botão vira "Salvar alterações" e aparece "Cancelar edição".
+let editingId = null;
+
+function setFormMode(editing) {
+    document.getElementById("new-sentence-title").textContent = editing ? "Editar frase" : "Nova frase";
+    document.getElementById("sentence-submit-label").textContent = editing ? "Salvar alterações" : "Adicionar frase";
+    document.getElementById("cancel-edit").hidden = !editing;
+}
+
+function clearSentenceForm() {
+    sentenceText.value = "";
+    sentenceAlt.value = "";
+    sentenceIcon.value = "";
+    setFormError();
+}
+
+function startEditing(entry) {
+    editingId = entry.id;
+    sentenceText.value = entry.text;
+    sentenceAlt.value = (entry.alt || []).join("\n");
+    sentenceIcon.value = entry.icon || "";
+    setFormError();
+    setFormMode(true);
+    renderSentenceLibrary();
+    sentenceText.focus();
+}
+
+function stopEditing() {
+    editingId = null;
+    clearSentenceForm();
+    setFormMode(false);
+    renderSentenceLibrary();
+}
+
+document.getElementById("cancel-edit").addEventListener("click", stopEditing);
+
 sentenceForm.addEventListener("submit", async event => {
     event.preventDefault();
     if (!access.canManage) return;
+    const editingEntry = editingId ? custom.sentences.find(other => other.id === editingId) : null;
     const text = cleanSentence(sentenceText.value);
     const alt = sentenceAlt.value.split(/\n+/).map(cleanSentence).filter(Boolean);
     if (sentenceWords(text).length < 3) {
@@ -1284,7 +1346,8 @@ sentenceForm.addEventListener("submit", async event => {
     const submitButton = sentenceForm.querySelector("button[type=submit]");
     submitButton.disabled = true;
     try {
-        await persistNewSentence(entry);
+        if (editingEntry) await persistUpdatedSentence(editingEntry, { text, alt: entry.alt, icon: entry.icon });
+        else await persistNewSentence(entry);
     } catch (error) {
         console.warn("Monte a Frase: erro ao salvar frase:", error);
         setFormError("Não consegui salvar a frase. Verifique a conexão e tente de novo.");
@@ -1292,11 +1355,13 @@ sentenceForm.addEventListener("submit", async event => {
     } finally {
         submitButton.disabled = false;
     }
-    sentenceText.value = "";
-    sentenceAlt.value = "";
-    sentenceIcon.value = "";
-    setFormError();
-    applyCustomChange(boardMode ? "Frase adicionada!" : `Frase adicionada ao nível ${levelForSentence(text)}!`);
+    const message = editingEntry
+        ? "Frase atualizada!"
+        : boardMode ? "Frase adicionada!" : `Frase adicionada ao nível ${levelForSentence(text)}!`;
+    editingId = null;
+    clearSentenceForm();
+    setFormMode(false);
+    applyCustomChange(message);
     sentenceText.focus();
 });
 
@@ -1314,6 +1379,7 @@ onlyCustom.addEventListener("change", async () => {
 });
 
 function closeManager() {
+    if (editingId) stopEditing(); // fechar no meio da edição descarta as mudanças não salvas
     managerOverlay.classList.remove("open");
     managerOverlay.setAttribute("aria-hidden", "true");
     document.body.style.overflow = "";

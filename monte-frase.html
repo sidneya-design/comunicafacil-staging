@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="vendor/fonts/outfit.css">
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="complete-frase.css">
-    <link rel="stylesheet" href="monte-frase.css?v=2">
+    <link rel="stylesheet" href="monte-frase.css?v=3">
 </head>
 
 <body>
@@ -215,7 +215,10 @@
 
                         <button class="save-question-button" type="submit">
                             <i class="fas fa-floppy-disk" aria-hidden="true"></i>
-                            <span>Adicionar frase</span>
+                            <span id="sentence-submit-label">Adicionar frase</span>
+                        </button>
+                        <button class="cancel-edit-button" id="cancel-edit" type="button" hidden>
+                            <i class="fas fa-xmark" aria-hidden="true"></i> Cancelar edição
                         </button>
                     </form>
                 </section>
@@ -239,7 +242,7 @@
         </aside>
     </div>
 
-    <script src="monte-frase.js?v=3" type="module"></script>
+    <script src="monte-frase.js?v=4" type="module"></script>
 </body>
 
 </html>
