@@ -5843,6 +5843,15 @@ function setupModals() {
         // banco — admin já é dono do conteúdo global, não precisa "adicionar".
         const readyBankTile = document.getElementById('btn-open-ready-bank');
         if (readyBankTile) readyBankTile.style.display = isDoctor ? 'flex' : 'none';
+        // Monte a Frase: o admin sempre vê; o médico só depois que o admin
+        // publicou a atividade (mesma regra do card na grade).
+        const monteFraseTile = document.getElementById('btn-create-monte-frase-exercise');
+        if (monteFraseTile) {
+            monteFraseTile.style.display = isAdmin ? 'flex' : 'none';
+            if (!isAdmin) getGameVisibility('monte-frase').then(visible => {
+                monteFraseTile.style.display = visible ? 'flex' : 'none';
+            });
+        }
         document.getElementById('exercise-type-modal').style.display = 'flex';
     });
 
@@ -5946,6 +5955,19 @@ function setupModals() {
         } else {
             openManagerMessage();
         }
+    });
+
+    // Monte a Frase no "Qual exercício deseja criar?": abre a atividade e o
+    // cadastro de frases (o iframe guarda o pedido até terminar de conferir
+    // o acesso, então não depende de tempo fixo como o setTimeout acima).
+    document.getElementById('btn-create-monte-frase-exercise')?.addEventListener('click', () => {
+        closeExerciseType();
+        const frame = document.getElementById('monte-frase-frame');
+        const openManagerMessage = () => frame.contentWindow?.postMessage({ type: 'monte-frase:open-manager' }, window.location.origin);
+        const alreadyLoaded = Boolean(frame.src) && frame.contentDocument?.readyState === 'complete';
+        if (!alreadyLoaded) frame.addEventListener('load', openManagerMessage, { once: true });
+        if (document.getElementById('game-monte-frase-container').style.display !== 'flex') openGame('monte-frase');
+        if (alreadyLoaded) openManagerMessage();
     });
 
     const closeExerciseUpload = () => { document.getElementById('upload-exercise-modal').style.display = 'none'; document.getElementById('upload-exercise-form').reset(); };

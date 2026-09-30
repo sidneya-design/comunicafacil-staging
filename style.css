@@ -375,6 +375,8 @@ body {
 .exercise-type-option.audio-real i { color: #0d9488; }
 .exercise-type-option.reading-text { border-color: #93c5fd; }
 .exercise-type-option.reading-text i { color: #2563eb; }
+.exercise-type-option.monte-frase { border-color: #a5b4fc; }
+.exercise-type-option.monte-frase i { color: #4f46e5; }
 
 .reading-text-phrase-block { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
 .reading-text-phrase-input { flex: 1; height: 40px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; padding: 0 12px; font-size: 15px; font-family: inherit; }

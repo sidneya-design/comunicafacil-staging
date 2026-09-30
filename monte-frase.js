@@ -1325,7 +1325,12 @@ document.getElementById("close-manager").addEventListener("click", closeManager)
 // complete-frase.js, com prefixo próprio).
 window.addEventListener("message", event => {
     if (event.origin !== window.location.origin || !event.data?.type) return;
-    if (event.data.type === "monte-frase:open-manager") openManager();
+    if (event.data.type === "monte-frase:open-manager") {
+        // Pedido que chega antes de terminar a verificação de acesso fica
+        // guardado e é atendido logo depois (ver initAccess().then abaixo).
+        if (accessReady) openManager();
+        else openManagerWhenReady = true;
+    }
     if (event.data.type === "monte-frase:pause-audio") {
         stopAudio();
         if (myAudio) myAudio.pause();
@@ -1363,12 +1368,16 @@ if (embeddedMode) {
     topline.appendChild(modeLink);
 }
 
+let accessReady = false;
+let openManagerWhenReady = false;
+
 // Nada do exercício aparece antes de sabermos se a pessoa pode entrar.
 const levelPicker = document.querySelector(".level-picker");
 levelPicker.hidden = true;
 modeLink.hidden = true;
 
 initAccess().then(() => {
+    accessReady = true;
     if (access.blocked) {
         const message = document.getElementById("access-message");
         message.innerHTML = `<i class="fas fa-lock" aria-hidden="true"></i><span></span>`;
@@ -1387,4 +1396,5 @@ initAccess().then(() => {
     levels = buildLevels();
     renderSentenceLibrary();
     startLevel(firstAvailableLevel(1));
+    if (openManagerWhenReady) openManager();
 });
