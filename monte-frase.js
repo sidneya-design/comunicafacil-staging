@@ -63,9 +63,12 @@ const slotLevels = {
 // Quem pode o quê (mesma cadeia dos outros conteúdos do app):
 //  - admin: sempre entra; publica a atividade pelo botão de visibilidade do
 //    card (game_flags) e cadastra frases no container global;
-//  - médico: só entra depois que o admin publicou; cadastra no próprio
-//    container (seed_key com ":doctor:<uuid>") e libera por paciente em
-//    "Meus Pacientes" (patient_exercise_flags);
+//  - médico: só entra depois que o admin publicou; cadastra no banco da
+//    CLÍNICA (seed_key ":company:<uuid>"), que todos os médicos da mesma
+//    empresa veem e editam — médico novo ou substituto encontra tudo o que os
+//    colegas já cadastraram. Médico sem empresa usa um banco só dele
+//    (":doctor:<uuid>"). Libera por paciente em "Meus Pacientes"
+//    (patient_exercise_flags);
 //  - paciente (e qualquer outro papel): só entra se o admin publicou E a RLS
 //    devolver um container liberado pra ele; nunca cadastra.
 // As frases ficam em exercise_items do container (role "monte-frase-card",
@@ -81,7 +84,7 @@ const CARD_ROLE = "monte-frase-card";
 const CONFIG_ROLE = "monte-frase-config";
 const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
-const access = { remote: false, role: null, userId: null, canManage: false, blocked: null, containerId: null, configItemId: null };
+const access = { remote: false, role: null, userId: null, companyId: null, canManage: false, blocked: null, containerId: null, configItemId: null };
 let supabase = null;
 let custom = { onlyCustom: false, sentences: [] };
 
@@ -98,6 +101,13 @@ function loadLocalCustom() {
 }
 
 function doctorScopedSeedKey(doctorUserId) { return `${SEED_KEY}:doctor:${doctorUserId}`; }
+function companyScopedSeedKey(companyId) { return `${SEED_KEY}:company:${companyId}`; }
+
+// Banco em que o médico cadastra: o da clínica, se ele tem empresa.
+function ownSeedKey() {
+    if (access.role !== "doctor") return SEED_KEY;
+    return access.companyId ? companyScopedSeedKey(access.companyId) : doctorScopedSeedKey(access.userId);
+}
 
 function parseRemoteItems(items) {
     const parsed = { onlyCustom: false, configItemId: null, sentences: [] };
@@ -159,10 +169,13 @@ async function initAccess() {
         }
 
         if (access.role === "admin" || access.role === "doctor") {
-            // Autoria: só o próprio container (global pro admin, o dele pro médico).
+            // Autoria: o banco global (admin) ou o da clínica do médico.
             access.canManage = true;
-            const ownKey = access.role === "doctor" ? doctorScopedSeedKey(access.userId) : SEED_KEY;
-            const { data: own } = await supabase.from("exercises").select("id").eq("seed_key", ownKey).maybeSingle();
+            if (access.role === "doctor") {
+                const { data: member } = await supabase.from("company_members").select("company_id").eq("user_id", access.userId).maybeSingle();
+                access.companyId = member?.company_id || null;
+            }
+            const { data: own } = await supabase.from("exercises").select("id").eq("seed_key", ownSeedKey()).maybeSingle();
             if (own) {
                 access.containerId = own.id;
                 const parsed = await fetchContainerItems(own.id);
@@ -173,11 +186,13 @@ async function initAccess() {
         }
 
         // Paciente: a RLS só devolve containers que o médico liberou pra ele.
-        // Usa o do próprio médico; se ele não cadastrou nada, cai no global
-        // do admin (quando também liberado).
-        const { data: patientRow } = await supabase.from("patients").select("doctor_user_id").eq("user_id", access.userId).maybeSingle();
-        const keys = [SEED_KEY];
-        if (patientRow?.doctor_user_id) keys.unshift(doctorScopedSeedKey(patientRow.doctor_user_id));
+        // Ordem: banco da clínica, banco só do médico (médico sem empresa) e,
+        // se nenhum tiver frases, o global do admin (quando também liberado).
+        const { data: patientRow } = await supabase.from("patients").select("doctor_user_id, company_id").eq("user_id", access.userId).maybeSingle();
+        const keys = [];
+        if (patientRow?.company_id) keys.push(companyScopedSeedKey(patientRow.company_id));
+        if (patientRow?.doctor_user_id) keys.push(doctorScopedSeedKey(patientRow.doctor_user_id));
+        keys.push(SEED_KEY);
         const { data: containers } = await supabase.from("exercises").select("id, seed_key").in("seed_key", keys);
         if (!containers?.length) {
             access.blocked = "Este exercício ainda não foi liberado para você. Fale com o seu médico.";
@@ -200,22 +215,30 @@ async function initAccess() {
 }
 
 // Container de quem está cadastrando — criado na primeira frase (mesmo padrão
-// de getOrCreateOwnCompleteFraseContainer em complete-frase.js).
+// de getOrCreateOwnCompleteFraseContainer em complete-frase.js). O da clínica
+// leva company_id: é isso que deixa os colegas lerem e editarem (RLS "banco
+// da empresa"), igual aos outros exercícios do médico.
 async function getOrCreateOwnContainer() {
     if (access.containerId) return access.containerId;
-    const isDoctor = access.role === "doctor";
-    const seedKey = isDoctor ? doctorScopedSeedKey(access.userId) : SEED_KEY;
-    const { data: existing } = await supabase.from("exercises").select("id").eq("seed_key", seedKey).maybeSingle();
-    if (existing) {
-        access.containerId = existing.id;
-        return existing.id;
+    const seedKey = ownSeedKey();
+    const findExisting = async () => (await supabase.from("exercises").select("id").eq("seed_key", seedKey).maybeSingle()).data;
+    let existing = await findExisting();
+    if (!existing) {
+        const payload = { title: CONTAINER_TITLE, visible: false, seed_key: seedKey };
+        if (access.role === "doctor") payload.doctor_user_id = access.userId;
+        if (access.role === "doctor" && access.companyId) payload.company_id = access.companyId;
+        const { data: created, error } = await supabase.from("exercises").insert([payload]).select().single();
+        if (error) {
+            // Um colega da clínica pode ter criado o mesmo banco ao mesmo tempo
+            // (seed_key é única): nesse caso, usa o dele.
+            existing = await findExisting();
+            if (!existing) throw error;
+        } else {
+            existing = created;
+        }
     }
-    const payload = { title: CONTAINER_TITLE, visible: false, seed_key: seedKey };
-    if (isDoctor) payload.doctor_user_id = access.userId;
-    const { data: created, error } = await supabase.from("exercises").insert([payload]).select().single();
-    if (error) throw error;
-    access.containerId = created.id;
-    return created.id;
+    access.containerId = existing.id;
+    return existing.id;
 }
 
 function sentencePayload(entry) {
@@ -1466,7 +1489,13 @@ initAccess().then(() => {
         ? "Demonstração local: as frases ficam salvas só neste navegador."
         : access.role === "admin"
             ? "Frases do banco global do admin. O médico decide para quais pacientes liberar."
-            : "Frases do seu banco. Valem para os pacientes a quem você liberar este exercício.";
+            : access.companyId
+                ? "Frases da clínica: todos os médicos da clínica veem e editam. Valem para os pacientes a quem cada um liberar este exercício."
+                : "Frases do seu banco. Valem para os pacientes a quem você liberar este exercício.";
+    if (access.companyId) {
+        document.getElementById("library-title").textContent = "Frases da clínica";
+        document.querySelector("#only-custom + span").textContent = "Usar só as frases da clínica";
+    }
     levels = buildLevels();
     renderSentenceLibrary();
     startLevel(firstAvailableLevel(1));

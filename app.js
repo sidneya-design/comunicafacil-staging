@@ -10816,8 +10816,10 @@ async function getOrCreateGameContainer(seedKey, title, doctorUserId = null) {
     });
 }
 
+// ":company:<uuid>" é o banco da clínica (hoje só o Monte a Frase usa).
 function isGameContainerSeedKey(seedKey, baseSeedKey) {
-    return seedKey === baseSeedKey || (typeof seedKey === 'string' && seedKey.startsWith(`${baseSeedKey}:doctor:`));
+    return seedKey === baseSeedKey || (typeof seedKey === 'string'
+        && (seedKey.startsWith(`${baseSeedKey}:doctor:`) || seedKey.startsWith(`${baseSeedKey}:company:`)));
 }
 
 // Resolve qual container de jogo (naming/afasia) usar pra leitura:
@@ -11749,6 +11751,29 @@ const COMPLETE_FRASE_TITLE = 'Complete a Frase|orange';
 // valores), e a linha em `exercises` é o que o médico libera por paciente.
 const MONTE_FRASE_SEED_KEY = 'monte-frase-container';
 const MONTE_FRASE_TITLE = 'Monte a Frase|blue';
+
+// Banco do Monte a Frase do médico logado: o da clínica (todos os médicos da
+// empresa compartilham, então médico novo ou substituto vê tudo), ou um só
+// dele se não tiver empresa. Mesma regra de monte-frase.js (ownSeedKey).
+function monteFraseOwnSeedKey() {
+    return currentUserCompanyId
+        ? `${MONTE_FRASE_SEED_KEY}:company:${currentUserCompanyId}`
+        : doctorScopedSeedKey(MONTE_FRASE_SEED_KEY, currentUserId);
+}
+
+// getOrCreateGameContainer procura por (seed_key, doctor_user_id) — no banco
+// da clínica o dono pode ser outro médico, então aqui a busca é só pela
+// seed_key (única), e o insert leva company_id pros colegas enxergarem.
+async function getOrCreateMonteFraseContainer(seedKey) {
+    const findExisting = async () => (await supabaseClient.from('exercises').select('*').eq('seed_key', seedKey).maybeSingle()).data;
+    const existing = await findExisting();
+    if (existing) return existing;
+    const payload = { title: MONTE_FRASE_TITLE, visible: false, seed_key: seedKey, doctor_user_id: currentUserId };
+    if (seedKey.includes(':company:')) payload.company_id = currentUserCompanyId;
+    const { data: created, error } = await supabaseClient.from('exercises').insert([payload]).select().single();
+    if (!error) return created;
+    return findExisting(); // um colega pode ter criado ao mesmo tempo
+}
 
 function makeNamingSetId() {
     return 'naming-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
@@ -14165,18 +14190,22 @@ async function openPatientExercisesModal(patient) {
     // Monte a Frase só entra na lista de liberação depois que o admin
     // publicou a atividade; antes disso o médico nem a enxerga.
     const monteFrasePublished = isAdmin || await getGameVisibility('monte-frase');
-    if (monteFrasePublished) activityPlaceholders.push({ baseSeedKey: MONTE_FRASE_SEED_KEY, title: MONTE_FRASE_TITLE });
+    if (monteFrasePublished) activityPlaceholders.push({ baseSeedKey: MONTE_FRASE_SEED_KEY, title: MONTE_FRASE_TITLE, ownSeedKey: monteFraseOwnSeedKey() });
     // Container já pode existir como global (admin cadastrou direto) OU como
     // banco do próprio médico — nos dois casos já tem uma linha de verdade
     // na lista, não precisa do placeholder virtual (evita duplicar a mesma
     // atividade duas vezes no modal).
     const existingSeedKeys = new Set((myExercises || []).map(ex => ex.seedKey || ex.seed_key));
     const virtualEntries = activityPlaceholders
-        .filter(p => !existingSeedKeys.has(p.baseSeedKey) && !existingSeedKeys.has(doctorScopedSeedKey(p.baseSeedKey, currentUserId)))
-        .map(p => ({ id: null, title: p.title, doctor_user_id: currentUserId, baseSeedKey: p.baseSeedKey }));
+        .filter(p => !existingSeedKeys.has(p.baseSeedKey) && !existingSeedKeys.has(p.ownSeedKey || doctorScopedSeedKey(p.baseSeedKey, currentUserId)))
+        .map(p => ({ id: null, title: p.title, doctor_user_id: currentUserId, baseSeedKey: p.baseSeedKey, ownSeedKey: p.ownSeedKey }));
 
+    // Com banco da clínica, um banco antigo só do médico (de antes dele entrar
+    // numa empresa) não aparece mais pra liberar — duplicaria o Monte a Frase.
+    const legacyMonteFraseKey = currentUserCompanyId ? doctorScopedSeedKey(MONTE_FRASE_SEED_KEY, currentUserId) : null;
     const allEntries = [...(myExercises || []), ...virtualEntries]
-        .filter(ex => monteFrasePublished || !isGameContainerSeedKey(ex.seedKey || ex.seed_key, MONTE_FRASE_SEED_KEY));
+        .filter(ex => monteFrasePublished || !isGameContainerSeedKey(ex.seedKey || ex.seed_key, MONTE_FRASE_SEED_KEY))
+        .filter(ex => !legacyMonteFraseKey || (ex.seedKey || ex.seed_key) !== legacyMonteFraseKey);
 
     list.innerHTML = '';
     if (!allEntries.length) {
@@ -14212,9 +14241,11 @@ async function openPatientExercisesModal(patient) {
                     // Primeira liberação desta atividade: cria o container
                     // vazio do médico agora (mesmo get-or-create que
                     // startNamingGame/startAfasiaGame/complete-frase usam).
-                    const container = await getOrCreateGameContainer(
-                        doctorScopedSeedKey(ex.baseSeedKey, currentUserId), ex.title, currentUserId
-                    );
+                    const container = ex.ownSeedKey
+                        ? await getOrCreateMonteFraseContainer(ex.ownSeedKey)
+                        : await getOrCreateGameContainer(
+                            doctorScopedSeedKey(ex.baseSeedKey, currentUserId), ex.title, currentUserId
+                        );
                     if (!container) throw new Error('Não consegui criar o container do exercício.');
                     exerciseId = container.id;
                 }
