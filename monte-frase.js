@@ -8,12 +8,10 @@
 // "Vou dormir cedo hoje") — exigir só a ordem cadastrada puniria uma resposta
 // correta.
 //
-// Dois modos de montar, com as mesmas pistas e a mesma etapa de fala:
-//  - padrão: espaços vazios + banco de palavras, em três níveis;
-//  - quadro (?modo=quadro): formato do "Desembaralhe" do Wordwall — as
-//    palavras ficam grandes numa lousa e são reordenadas no próprio lugar.
+// Formato do "Desembaralhe" do Wordwall: as palavras ficam grandes numa lousa
+// e são reordenadas no próprio lugar. (Existiu um "modo espaços", com banco
+// de palavras e níveis; foi removido por não ser necessário.)
 const pageParams = new URLSearchParams(window.location.search);
-const boardMode = pageParams.get("modo") === "quadro";
 // Dentro do app (iframe em app.html, aberto por openGame('monte-frase')): o
 // cabeçalho próprio some e quem conta acessos e tempo de uso é o app, do
 // mesmo jeito que faz com o Complete a Frase.
@@ -32,33 +30,6 @@ const boardSentences = [
     { text: "Vou escovar os dentes.", icon: "🪥" }
 ];
 
-const slotLevels = {
-    1: [
-        { text: "Eu quero água.", icon: "💧" },
-        { text: "O angu está pronto.", icon: "🍲" },
-        { text: "Minha mãe me ligou.", icon: "📞" },
-        { text: "Vou escovar os dentes.", icon: "🪥" },
-        { text: "Quero visitar minha filha.", icon: "👩" },
-        { text: "Hoje vou dormir cedo.", icon: "😴", alt: ["Vou dormir cedo hoje."] }
-    ],
-    2: [
-        { text: "Eu preciso tomar meu remédio.", icon: "💊" },
-        { text: "Vou ligar para minha filha.", icon: "📞" },
-        { text: "Hoje eu estou com fome.", icon: "🍽️", alt: ["Eu estou com fome hoje.", "Eu hoje estou com fome."] },
-        { text: "Ontem teve missa na igreja.", icon: "⛪", alt: ["Teve missa na igreja ontem.", "Teve missa ontem na igreja."] },
-        { text: "Quero assistir televisão na sala.", icon: "📺" },
-        { text: "Vamos tomar café na cozinha.", icon: "☕" }
-    ],
-    3: [
-        { text: "O bolo de milho está gostoso.", icon: "🌽" },
-        { text: "O café está forte e quente.", icon: "☕", alt: ["O café está quente e forte."] },
-        { text: "Amanhã vou viajar para a praia.", icon: "🏖️", alt: ["Vou viajar para a praia amanhã."] },
-        { text: "Gosto de ver filme na televisão.", icon: "🎬" },
-        { text: "Hoje à tarde vou ao médico.", icon: "🩺", alt: ["Vou ao médico hoje à tarde."] },
-        { text: "Eu quero arroz com feijão e salada.", icon: "🍛" }
-    ]
-};
-
 // ── Acesso e frases cadastradas ───────────────────────────────────────────
 // Quem pode o quê (mesma cadeia dos outros conteúdos do app):
 //  - admin: sempre entra; publica a atividade pelo botão de visibilidade do
@@ -75,7 +46,7 @@ const slotLevels = {
 // dados em JSON na coluna link), como o Complete a Frase faz. Sem sessão em
 // localhost vale a demonstração local: cadastro liberado, salvo só no
 // navegador. No modo padrão o nível é decidido pelo número de palavras; no
-// quadro entram todas na mesma lista.
+// quadro entram todas na mesma lista, depois das prontas.
 const CUSTOM_KEY = "comunicafacil_monte_frase_custom_v1";
 const GAME_ID = "monte-frase";
 const SEED_KEY = "monte-frase-container"; // = MONTE_FRASE_SEED_KEY em app.js
@@ -311,57 +282,32 @@ async function persistOnlyCustom(value) {
     custom.onlyCustom = value;
 }
 
-function levelForSentence(text) {
-    const count = sentenceWords(text).length;
-    return count <= 4 ? 1 : count === 5 ? 2 : 3;
-}
-
 function buildLevels() {
     const useDefaults = !(custom.onlyCustom && custom.sentences.length);
-    if (boardMode) return { 1: [...(useDefaults ? boardSentences : []), ...custom.sentences] };
-    const built = { 1: [], 2: [], 3: [] };
-    if (useDefaults) Object.entries(slotLevels).forEach(([level, items]) => built[level].push(...items));
-    custom.sentences.forEach(item => built[levelForSentence(item.text)].push(item));
-    return built;
+    return { 1: [...(useDefaults ? boardSentences : []), ...custom.sentences] };
 }
 
 let levels = buildLevels();
 
-// Com "usar só as minhas frases", um nível pode ficar vazio.
-function firstAvailableLevel(preferred) {
-    if (levels[preferred]?.length) return preferred;
-    return Number(Object.keys(levels).find(level => levels[level].length));
-}
-
-function nextAvailableLevel() {
-    return Object.keys(levels).map(Number).find(level => level > state.level && levels[level].length);
-}
-
-// `errors` conta montagens erradas no modo padrão e movimentos no modo
-// quadro (lá não existe "montagem errada": a frase fecha sozinha quando a
-// ordem fica certa).
+// `errors` conta movimentos (não existe "montagem errada": a frase fecha
+// sozinha quando a ordem fica certa). `level` é sempre 1 — sobrou do tempo em
+// que havia níveis, e o resto do código indexa `levels` por ele.
 const state = {
     level: 1, round: 0, sound: true,
     completed: false, busy: false,
-    hintLevel: 0, errors: 0, speech: null,
+    hintLevel: 0, errors: 0,
     stats: []
 };
 
 const sentenceArea = document.getElementById("sentence-area");
-const wordBank = document.getElementById("word-bank");
 const feedback = document.getElementById("feedback");
-const nextButton = document.getElementById("next-round");
 const hintButton = document.getElementById("hint-button");
 const listenButton = document.getElementById("listen-prompt");
 const visualClue = document.getElementById("visual-clue");
 const exerciseCard = document.getElementById("exercise-card");
 const summaryCard = document.getElementById("summary-card");
 const speechPanel = document.getElementById("speech-panel");
-const speechRecord = document.getElementById("speech-record");
-const speechMine = document.getElementById("speech-mine");
 const speechSlow = document.getElementById("speech-slow");
-const speechResult = document.getElementById("speech-result");
-const speechSelf = document.getElementById("speech-self");
 
 function currentExercise() { return levels[state.level][state.round]; }
 
@@ -479,109 +425,6 @@ function updateCounters() {
     document.getElementById("board-score").textContent = score;
     document.getElementById("board-position").textContent = `${state.round + 1} de ${total}`;
     document.getElementById("board-prev").disabled = state.round === 0;
-}
-
-function zones() { return [...sentenceArea.querySelectorAll(".drop-zone")]; }
-
-function createDropZone(index) {
-    const zone = document.createElement("button");
-    zone.type = "button";
-    zone.className = "drop-zone";
-    zone.dataset.slot = index;
-    zone.setAttribute("aria-label", `Espaço ${index + 1} da frase`);
-    zone.addEventListener("click", () => {
-        if (zone.classList.contains("filled") && !zone.classList.contains("locked")) {
-            removePlacedOption(zone);
-            setFeedback("", "Palavra devolvida. Escolha outra.");
-        }
-    });
-    zone.addEventListener("dragover", event => {
-        if (zone.classList.contains("locked")) return;
-        event.preventDefault();
-        zone.classList.add("drag-over");
-    });
-    zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
-    zone.addEventListener("drop", event => {
-        event.preventDefault();
-        zone.classList.remove("drag-over");
-        if (zone.classList.contains("locked")) return;
-        if (zone.classList.contains("filled")) removePlacedOption(zone);
-        placeOption(event.dataTransfer.getData("text/plain"), zone);
-    });
-    return zone;
-}
-
-function createOption(word, index) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "word-option";
-    button.id = `option-${index}`;
-    button.dataset.word = word;
-    button.draggable = true;
-    button.textContent = word;
-    button.addEventListener("click", () => {
-        const firstEmpty = zones().find(zone => !zone.classList.contains("filled"));
-        if (firstEmpty) placeOption(button.id, firstEmpty);
-    });
-    button.addEventListener("dragstart", event => {
-        event.dataTransfer.setData("text/plain", button.id);
-        event.dataTransfer.effectAllowed = "move";
-    });
-    return button;
-}
-
-function placeOption(optionId, zone, { validate = true } = {}) {
-    if (state.completed || state.busy || zone.classList.contains("filled")) return;
-    const option = document.getElementById(optionId);
-    if (!option || option.classList.contains("used")) return;
-    zone.textContent = option.dataset.word;
-    zone.dataset.optionId = option.id;
-    zone.dataset.word = option.dataset.word;
-    zone.classList.add("filled");
-    zone.setAttribute("aria-label", `Remover ${option.dataset.word} da frase`);
-    option.classList.add("used");
-    if (validate) validateIfReady();
-}
-
-function removePlacedOption(zone) {
-    const option = document.getElementById(zone.dataset.optionId);
-    if (option) option.classList.remove("used");
-    zone.textContent = "";
-    delete zone.dataset.optionId;
-    delete zone.dataset.word;
-    zone.className = "drop-zone";
-    zone.setAttribute("aria-label", `Espaço ${Number(zone.dataset.slot) + 1} da frase`);
-}
-
-function validateIfReady() {
-    const allZones = zones();
-    if (allZones.some(zone => !zone.classList.contains("filled"))) return;
-    const placed = allZones.map(zone => zone.dataset.word);
-    const orders = acceptedOrders(currentExercise());
-    if (matchesAnOrder(placed, orders)) {
-        finishAssembly();
-        return;
-    }
-
-    // Compara com a ordem aceita mais próxima do que a pessoa montou, e devolve
-    // só as palavras fora do lugar: as que já estão certas ficam.
-    const matches = order => order.filter((word, index) => word === placed[index]).length;
-    const closest = orders.reduce((best, order) => (matches(order) > matches(best) ? order : best));
-    state.errors += 1;
-    state.busy = true;
-    allZones.forEach((zone, index) => {
-        if (!zone.classList.contains("locked")) zone.classList.add(zone.dataset.word === closest[index] ? "correct" : "wrong");
-    });
-    setFeedback("retry", "Quase! Algumas palavras estão fora do lugar.", "fa-lightbulb");
-    setTimeout(() => {
-        if (!allZones[0].isConnected) return; // a pessoa trocou de nível no meio da animação
-        allZones.forEach(zone => {
-            if (zone.classList.contains("wrong")) removePlacedOption(zone);
-            else zone.classList.remove("correct");
-        });
-        state.busy = false;
-        setFeedback("", "As palavras certas ficaram. Tente de novo com as outras.");
-    }, 1300);
 }
 
 // ── Modo quadro: reordenar no próprio lugar ───────────────────────────────
@@ -736,7 +579,7 @@ function lockBoardPrefix(count) {
 
 function saveStat() {
     state.stats[state.round] = {
-        text: currentExercise().text, errors: state.errors, hints: state.hintLevel, speech: state.speech, done: true
+        text: currentExercise().text, errors: state.errors, hints: state.hintLevel, done: true
     };
 }
 
@@ -746,7 +589,7 @@ function modelText() { return state.shownText || currentExercise().text; }
 
 function finishAssembly() {
     const item = currentExercise();
-    const placed = (boardMode ? tiles() : zones()).map(element => element.dataset.word);
+    const placed = tiles().map(element => element.dataset.word);
     state.shownText = [item.text, ...(item.alt || [])].find(text => matchesAnOrder(placed, [sentenceWords(text)])) || item.text;
     state.completed = true;
     saveStat();
@@ -755,11 +598,8 @@ function finishAssembly() {
     finalSentence.className = "final-sentence";
     finalSentence.textContent = state.shownText;
     sentenceArea.appendChild(finalSentence);
-    wordBank.innerHTML = "";
-    document.querySelector(".options-label").hidden = true;
     hintButton.hidden = true;
     listenButton.classList.add("visible");
-    nextButton.disabled = false;
     setFeedback("success", "Muito bem! A frase está montada.", "fa-circle-check");
     updateCounters();
     openSpeechPanel();
@@ -773,31 +613,6 @@ function maxLockedWords() {
     return Math.max(1, sentenceWords(currentExercise().text).length - 2);
 }
 
-function lockPrefix(count) {
-    if (boardMode) {
-        lockBoardPrefix(count);
-        return;
-    }
-    const canonical = sentenceWords(currentExercise().text);
-    const allZones = zones();
-    for (let index = 0; index < count; index += 1) {
-        const zone = allZones[index];
-        if (zone.classList.contains("locked")) continue;
-        if (zone.classList.contains("filled")) removePlacedOption(zone);
-        let option = [...wordBank.querySelectorAll(".word-option:not(.used)")].find(el => el.dataset.word === canonical[index]);
-        if (!option) {
-            const holder = allZones.find(other => !other.classList.contains("locked") && other.dataset.word === canonical[index]);
-            if (!holder) continue;
-            option = document.getElementById(holder.dataset.optionId);
-            removePlacedOption(holder);
-        }
-        placeOption(option.id, zone, { validate: false });
-        zone.classList.add("locked");
-        zone.setAttribute("aria-label", `${canonical[index]}, palavra fixada pela pista`);
-    }
-    validateIfReady();
-}
-
 function giveHint() {
     if (state.completed || state.busy) return;
     const item = currentExercise();
@@ -808,7 +623,7 @@ function giveHint() {
         speak(item.text, { force: true });
     } else {
         const locked = Math.min(state.hintLevel - 1, maxLockedWords());
-        lockPrefix(locked);
+        lockBoardPrefix(locked);
         if (!state.completed) setFeedback("", locked === 1 ? "A primeira palavra já está no lugar." : `As ${locked} primeiras palavras já estão no lugar.`, "fa-lightbulb");
     }
     hintButton.querySelector("span").textContent = "Mais uma pista";
@@ -816,258 +631,38 @@ function giveHint() {
 }
 
 // ── Etapa de fala ─────────────────────────────────────────────────────────
-// Gravador WAV 16 kHz mono, no formato que a Azure STT exige (mesma técnica do
-// gravador da aba IA em app.js).
-const MAX_RECORDING_MS = 15000;
-let recorder = null;
-let recordingTimeout = null;
-let myRecordingUrl = null;
-let myAudio = null;
-let transcriptionAvailable = isLocalhost;
-
-async function startRecording() {
-    const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-    });
-    const context = new (window.AudioContext || window.webkitAudioContext)();
-    const source = context.createMediaStreamSource(stream);
-    const node = context.createScriptProcessor(4096, 1, 1);
-    const chunks = [];
-    node.onaudioprocess = event => chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
-    source.connect(node);
-    node.connect(context.destination);
-    recorder = { stream, context, source, node, chunks, sampleRate: context.sampleRate };
-}
-
-async function resampleTo16k(samples, sourceSampleRate) {
-    if (Math.round(sourceSampleRate) === 16000) return samples;
-    const offline = new OfflineAudioContext(1, Math.ceil(samples.length * 16000 / sourceSampleRate), 16000);
-    const buffer = offline.createBuffer(1, samples.length, sourceSampleRate);
-    buffer.copyToChannel(samples, 0);
-    const source = offline.createBufferSource();
-    source.buffer = buffer;
-    source.connect(offline.destination);
-    source.start();
-    return (await offline.startRendering()).getChannelData(0);
-}
-
-async function stopRecording() {
-    const { stream, context, source, node, chunks, sampleRate } = recorder;
-    recorder = null;
-    node.disconnect();
-    source.disconnect();
-    stream.getTracks().forEach(track => track.stop());
-    await context.close();
-
-    const raw = new Float32Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
-    let offset = 0;
-    chunks.forEach(chunk => { raw.set(chunk, offset); offset += chunk.length; });
-    if (!raw.length) return null;
-    const samples = await resampleTo16k(raw, sampleRate);
-
-    // Normaliza o pico: mic embutido de notebook capta baixo demais pra Azure.
-    let peak = 0;
-    for (let index = 0; index < samples.length; index += 1) peak = Math.max(peak, Math.abs(samples[index]));
-    const gain = peak > 0 && peak < 0.9 ? 0.95 / peak : 1;
-
-    const view = new DataView(new ArrayBuffer(44 + samples.length * 2));
-    const writeString = (position, text) => { for (let index = 0; index < text.length; index += 1) view.setUint8(position + index, text.charCodeAt(index)); };
-    writeString(0, "RIFF");
-    view.setUint32(4, 36 + samples.length * 2, true);
-    writeString(8, "WAVE");
-    writeString(12, "fmt ");
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, 16000, true);
-    view.setUint32(28, 32000, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, "data");
-    view.setUint32(40, samples.length * 2, true);
-    for (let index = 0; index < samples.length; index += 1) {
-        const sample = Math.max(-1, Math.min(1, samples[index] * gain));
-        view.setInt16(44 + index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-    }
-    return new Blob([view], { type: "audio/wav" });
-}
-
-function normalizeSpoken(text) {
-    return text.toLocaleLowerCase("pt-BR").normalize("NFD").replace(/\p{M}/gu, "").replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
-}
-
-// Confere palavra por palavra em vez de exigir a frase idêntica: o
-// reconhecimento erra bastante com fala afásica, então o retorno tem três
-// níveis (tudo / quase / de novo) e nunca um "errado" seco.
-function evaluateSpeech(transcription, item) {
-    const target = sentenceWords(item.text);
-    const pool = normalizeSpoken(transcription);
-    const said = target.map(word => {
-        const position = pool.indexOf(normalizeSpoken(word)[0]);
-        if (position === -1) return false;
-        pool.splice(position, 1);
-        return true;
-    });
-    const ratio = said.filter(Boolean).length / target.length;
-    return { target, said, verdict: ratio === 1 ? "ok" : ratio >= 0.5 ? "almost" : "retry" };
-}
-
-const SPEECH_RANK = { retry: 1, almost: 2, "self-good": 3, ok: 3 };
-
-function registerSpeech(result) {
-    if (!state.speech || SPEECH_RANK[result] > SPEECH_RANK[state.speech]) state.speech = result;
-}
-
-function showSpeechResult(transcription, evaluation) {
-    const messages = {
-        ok: "Muito bem! Você falou a frase toda.",
-        almost: "Quase! Faltou pouco.",
-        retry: "Vamos de novo? Ouça o modelo e fale junto."
-    };
-    speechResult.className = `speech-result ${evaluation.verdict}`;
-    speechResult.innerHTML = "";
-    const title = document.createElement("strong");
-    title.textContent = messages[evaluation.verdict];
-    const words = document.createElement("div");
-    words.className = "speech-words";
-    evaluation.target.forEach((word, index) => {
-        const chip = document.createElement("span");
-        chip.textContent = word;
-        if (evaluation.said[index]) chip.classList.add("said");
-        words.appendChild(chip);
-    });
-    const heard = document.createElement("small");
-    heard.textContent = `O computador entendeu: “${transcription}”`;
-    speechResult.append(title, words, heard);
-    speechResult.hidden = false;
-    speechSelf.hidden = true;
-}
-
-function askSelfEvaluation(message) {
-    speechResult.className = "speech-result";
-    speechResult.textContent = message;
-    speechResult.hidden = false;
-    speechSelf.hidden = false;
-}
-
-async function transcribe(blob) {
-    const formData = new FormData();
-    formData.append("audio", blob, "fala.wav");
-    let response;
-    try {
-        response = await fetch(`${LOCAL_API}/transcribe`, { method: "POST", body: formData });
-    } catch (networkError) {
-        transcriptionAvailable = false; // servidor local fora do ar: não tenta de novo nesta sessão
-        return null;
-    }
-    if (response.status === 404) transcriptionAvailable = false;
-    if (!response.ok) return null;
-    const data = await response.json();
-    return (data.transcription || "").trim() || null;
-}
-
-function setRecordButton(label, icon, recording) {
-    speechRecord.classList.toggle("recording", recording);
-    speechRecord.querySelector("i").className = `fas ${icon}`;
-    speechRecord.querySelector("span").textContent = label;
-}
-
-async function toggleRecording() {
-    if (!recorder) {
-        stopAudio();
-        if (myAudio) myAudio.pause();
-        try {
-            await startRecording();
-        } catch (error) {
-            askSelfEvaluation("Não consegui usar o microfone. Verifique a permissão do navegador.");
-            speechSelf.hidden = true;
-            return;
-        }
-        setRecordButton("Parar gravação", "fa-stop", true);
-        speechResult.hidden = true;
-        speechSelf.hidden = true;
-        recordingTimeout = setTimeout(toggleRecording, MAX_RECORDING_MS);
-        return;
-    }
-
-    clearTimeout(recordingTimeout);
-    const item = currentExercise();
-    setRecordButton("Processando...", "fa-spinner fa-spin", false);
-    speechRecord.disabled = true;
-    const blob = await stopRecording();
-    speechRecord.disabled = false;
-    setRecordButton("Gravar de novo", "fa-microphone", false);
-    if (!blob) return;
-    if (myRecordingUrl) URL.revokeObjectURL(myRecordingUrl);
-    myRecordingUrl = URL.createObjectURL(blob);
-    speechMine.hidden = false;
-
-    const transcription = transcriptionAvailable ? await transcribe(blob) : null;
-    if (item !== currentExercise() || !state.completed) return; // a pessoa já avançou
-    if (transcription) {
-        const evaluation = evaluateSpeech(transcription, item);
-        registerSpeech(evaluation.verdict);
-        showSpeechResult(transcription, evaluation);
-    } else {
-        askSelfEvaluation("Ouça a sua gravação e compare com o modelo.");
-    }
-}
-
+// Depois de montar, o paciente ouve o modelo (normal ou devagar) e fala junto.
+// (A gravação da própria voz com comparação existiu e foi removida por não ser
+// necessária.)
 function openSpeechPanel() {
     speechPanel.hidden = false;
-    speechMine.hidden = true;
-    speechResult.hidden = true;
-    speechSelf.hidden = true;
-    setRecordButton("Gravar minha voz", "fa-microphone", false);
 }
 
-async function closeSpeechPanel() {
-    clearTimeout(recordingTimeout);
-    if (recorder) await stopRecording();
-    if (myAudio) myAudio.pause();
-    if (myRecordingUrl) URL.revokeObjectURL(myRecordingUrl);
-    myRecordingUrl = null;
+function closeSpeechPanel() {
     speechPanel.hidden = true;
 }
 
 // ── Rodadas e resumo ──────────────────────────────────────────────────────
 function renderExercise() {
     const item = currentExercise();
-    Object.assign(state, { completed: false, busy: false, hintLevel: 0, errors: 0, speech: null, shownText: null });
+    Object.assign(state, { completed: false, busy: false, hintLevel: 0, errors: 0, shownText: null });
     exerciseCard.hidden = false;
     summaryCard.hidden = true;
     sentenceArea.innerHTML = "";
-    wordBank.innerHTML = "";
-    document.querySelector(".options-label").hidden = boardMode;
     selectedTile = null;
-    const words = sentenceWords(item.text);
-    const shuffled = shuffleForDisplay(words, acceptedOrders(item));
-    if (boardMode) {
-        shuffled.forEach(word => sentenceArea.appendChild(createTile(word)));
-    } else {
-        words.forEach((word, index) => sentenceArea.appendChild(createDropZone(index)));
-        shuffled.forEach((word, index) => wordBank.appendChild(createOption(word, index)));
-    }
+    shuffleForDisplay(sentenceWords(item.text), acceptedOrders(item)).forEach(word => sentenceArea.appendChild(createTile(word)));
     visualClue.textContent = item.icon || "";
     visualClue.classList.toggle("visible", Boolean(item.icon));
     listenButton.classList.remove("visible");
     hintButton.hidden = false;
     hintButton.disabled = false;
     hintButton.querySelector("span").textContent = "Preciso de ajuda";
-    nextButton.disabled = true;
-    nextButton.innerHTML = state.round === levels[state.level].length - 1
-        ? `Concluir nível <i class="fas fa-check" aria-hidden="true"></i>`
-        : `Próxima <i class="fas fa-arrow-right" aria-hidden="true"></i>`;
-    setFeedback("", boardMode
-        ? "Arraste uma palavra para o lugar certo, ou toque em duas palavras para trocá-las."
-        : "Toque em uma palavra para colocá-la na frase. Toque de novo para tirar.");
+    setFeedback("", "Arraste uma palavra para o lugar certo, ou toque em duas palavras para trocá-las.");
     updateCounters();
     getTtsAudio(item.text).catch(() => { /* o clique usa a voz nativa se precisar */ });
 }
 
-const SPEECH_LABELS = { ok: "Falou tudo", almost: "Quase", retry: "Tentou", "self-good": "Ficou bom (autoavaliação)" };
-
-// ── Cronômetro (só no modo quadro) ────────────────────────────────────────
+// ── Cronômetro ────────────────────────────────────────────────────────
 // Conta pra cima, como no Wordwall: mede o tempo, não impõe limite.
 let timerInterval = null;
 let timerStart = 0;
@@ -1092,11 +687,9 @@ function renderSummary() {
     const done = state.stats.filter(stat => stat.done);
     const cards = [
         [done.length, "frases montadas"],
-        boardMode
-            ? [formatTime(Date.now() - timerStart), "tempo total"]
-            : [done.filter(stat => stat.errors === 0 && stat.hints === 0).length, "de primeira, sem pista"],
+        [formatTime(Date.now() - timerStart), "tempo total"],
         [done.reduce((sum, stat) => sum + stat.hints, 0), "pistas usadas"],
-        [done.filter(stat => stat.speech === "ok" || stat.speech === "self-good").length, "frases bem faladas"]
+        [state.stats.filter(stat => !stat.done).length, "frases puladas"]
     ];
     const grid = document.getElementById("summary-grid");
     grid.innerHTML = "";
@@ -1114,8 +707,8 @@ function renderSummary() {
     state.stats.forEach(stat => {
         const row = document.createElement("tr");
         const values = stat.done
-            ? [stat.text, stat.errors, stat.hints, SPEECH_LABELS[stat.speech] || "Não falou"]
-            : [stat.text, "—", "—", "Pulou a frase"];
+            ? [stat.text, stat.errors, stat.hints]
+            : [stat.text, "Pulou a frase", "—"];
         values.forEach(value => {
             const cell = document.createElement("td");
             cell.textContent = value;
@@ -1123,36 +716,24 @@ function renderSummary() {
         });
         rows.appendChild(row);
     });
-    document.getElementById("summary-next-level").hidden = !nextAvailableLevel();
 }
 
-function startLevel(level) {
+// Recomeça a lista de frases do início (entrada, "Recomeçar" e mudança no cadastro).
+function startLevel() {
     stopAudio();
     closeSpeechPanel();
-    Object.assign(state, { level, round: 0, stats: [] });
-    if (boardMode) startTimer();
-    document.querySelectorAll(".level-button").forEach(button => {
-        const active = Number(button.dataset.level) === level;
-        button.classList.toggle("active", active);
-        button.setAttribute("aria-pressed", String(active));
-        button.disabled = !levels[button.dataset.level]?.length;
-    });
+    Object.assign(state, { level: 1, round: 0, stats: [] });
+    startTimer();
     renderExercise();
 }
 
-document.querySelectorAll(".level-button").forEach(button => {
-    button.addEventListener("click", () => {
-        if (Number(button.dataset.level) !== state.level) startLevel(Number(button.dataset.level));
-    });
-});
-
-// Sai da frase atual guardando o resultado. No modo quadro dá pra avançar sem
-// montar (fica registrado como frase pulada) e voltar pra refazer.
+// Sai da frase atual guardando o resultado. Dá pra avançar sem montar (fica
+// registrado como frase pulada) e voltar pra refazer.
 async function leaveRound(step) {
     const target = state.round + step;
     if (target < 0) return;
     stopAudio();
-    await closeSpeechPanel();
+    closeSpeechPanel();
     if (state.completed) saveStat();
     else if (!state.stats[state.round]) state.stats[state.round] = { text: currentExercise().text, done: false };
     if (target >= levels[state.level].length) {
@@ -1163,7 +744,6 @@ async function leaveRound(step) {
     renderExercise();
 }
 
-nextButton.addEventListener("click", () => { if (state.completed) leaveRound(1); });
 document.getElementById("board-prev").addEventListener("click", () => leaveRound(-1));
 document.getElementById("board-next").addEventListener("click", () => leaveRound(1));
 
@@ -1174,28 +754,7 @@ speechSlow.addEventListener("click", () => {
     slowModel = !slowModel;
     speechSlow.setAttribute("aria-pressed", String(slowModel));
 });
-speechRecord.addEventListener("click", toggleRecording);
-speechMine.addEventListener("click", () => {
-    if (!myRecordingUrl) return;
-    stopAudio();
-    if (myAudio) myAudio.pause();
-    myAudio = new Audio(myRecordingUrl);
-    myAudio.play();
-});
-document.getElementById("speech-self-good").addEventListener("click", () => {
-    registerSpeech("self-good");
-    speechSelf.hidden = true;
-    speechResult.className = "speech-result ok";
-    speechResult.textContent = "Muito bem!";
-});
-document.getElementById("speech-self-retry").addEventListener("click", () => {
-    registerSpeech("retry");
-    speechSelf.hidden = true;
-    speechResult.hidden = true;
-    speak(modelText(), { force: true, slow: slowModel });
-});
-document.getElementById("summary-restart").addEventListener("click", () => startLevel(state.level));
-document.getElementById("summary-next-level").addEventListener("click", () => startLevel(nextAvailableLevel()));
+document.getElementById("summary-restart").addEventListener("click", () => startLevel());
 document.getElementById("sound-toggle").addEventListener("click", event => {
     state.sound = !state.sound;
     event.currentTarget.setAttribute("aria-pressed", String(state.sound));
@@ -1270,7 +829,7 @@ function renderSentenceLibrary() {
         const meta = document.createElement("small");
         const words = sentenceWords(entry.text).length;
         const extra = entry.alt?.length ? ` · ${entry.alt.length + 1} ordens aceitas` : "";
-        meta.textContent = boardMode ? `${words} palavras${extra}` : `Nível ${levelForSentence(entry.text)} · ${words} palavras${extra}`;
+        meta.textContent = `${words} palavras${extra}`;
         copy.append(title, meta);
         const edit = document.createElement("button");
         edit.type = "button";
@@ -1305,7 +864,7 @@ function renderSentenceLibrary() {
 function applyCustomChange(message) {
     levels = buildLevels();
     renderSentenceLibrary();
-    startLevel(firstAvailableLevel(state.level));
+    startLevel();
     showToast(message);
 }
 
@@ -1380,7 +939,7 @@ sentenceForm.addEventListener("submit", async event => {
     }
     const message = editingEntry
         ? "Frase atualizada!"
-        : boardMode ? "Frase adicionada!" : `Frase adicionada ao nível ${levelForSentence(text)}!`;
+        : "Frase adicionada!";
     editingId = null;
     clearSentenceForm();
     setFormMode(false);
@@ -1430,48 +989,19 @@ window.addEventListener("message", event => {
     }
     if (event.data.type === "monte-frase:pause-audio") {
         stopAudio();
-        if (myAudio) myAudio.pause();
     }
 });
 managerOverlay.addEventListener("click", event => { if (event.target === managerOverlay) closeManager(); });
 document.addEventListener("keydown", event => { if (event.key === "Escape" && managerOverlay.classList.contains("open")) closeManager(); });
 
-const modeLink = document.getElementById("mode-link");
-if (boardMode) {
-    document.body.classList.add("board-mode");
-    document.querySelector(".level-picker").hidden = true;
-    document.getElementById("board-top").hidden = false;
-    document.getElementById("board-nav").hidden = false;
-    nextButton.hidden = true;
-    document.getElementById("instruction-text").textContent = "Arrume as palavras para formar a frase.";
-    document.getElementById("summary-errors-heading").textContent = "Movimentos";
-    document.getElementById("summary-restart").lastChild.textContent = " Recomeçar";
-    modeLink.querySelector("span").textContent = "Modo espaços";
-    modeLink.querySelector("i").className = "fas fa-table-cells-large";
-}
-
-const otherModeParams = new URLSearchParams();
-if (embeddedMode) otherModeParams.set("embedded", "1");
-if (!boardMode) otherModeParams.set("modo", "quadro");
-if (pageParams.get("sb")) otherModeParams.set("sb", pageParams.get("sb"));
-modeLink.href = `monte-frase.html${otherModeParams.toString() ? `?${otherModeParams}` : ""}`;
-
-if (embeddedMode) {
-    document.body.classList.add("embedded-mode");
-    // O cabeçalho some no modo embutido: a troca de modo (e, no modo espaços,
-    // o placar) descem pra linha de cima do exercício.
-    const topline = document.querySelector(".exercise-topline");
-    if (!boardMode) topline.insertBefore(document.querySelector(".score-card"), listenButton);
-    topline.appendChild(modeLink);
-}
+document.body.classList.add("board-mode"); // os estilos da lousa dependem desta classe
+if (embeddedMode) document.body.classList.add("embedded-mode");
 
 let accessReady = false;
 let openManagerWhenReady = false;
 
-// Nada do exercício aparece antes de sabermos se a pessoa pode entrar.
-const levelPicker = document.querySelector(".level-picker");
-levelPicker.hidden = true;
-modeLink.hidden = true;
+// Nada do exercício aparece antes de sabermos se a pessoa pode entrar
+// (exercise-card começa com hidden no HTML).
 
 initAccess().then(() => {
     accessReady = true;
@@ -1482,8 +1012,6 @@ initAccess().then(() => {
         return;
     }
     document.getElementById("access-card").hidden = true;
-    levelPicker.hidden = boardMode;
-    modeLink.hidden = false;
     document.getElementById("open-manager").hidden = !access.canManage;
     document.getElementById("manager-scope").textContent = !access.remote
         ? "Demonstração local: as frases ficam salvas só neste navegador."
@@ -1498,6 +1026,6 @@ initAccess().then(() => {
     }
     levels = buildLevels();
     renderSentenceLibrary();
-    startLevel(firstAvailableLevel(1));
+    startLevel();
     if (openManagerWhenReady) openManager();
 });

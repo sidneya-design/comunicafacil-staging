@@ -10,10 +10,10 @@
     <link rel="stylesheet" href="vendor/fonts/outfit.css">
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="complete-frase.css">
-    <link rel="stylesheet" href="monte-frase.css?v=3">
+    <link rel="stylesheet" href="monte-frase.css?v=4">
 </head>
 
-<body>
+<body class="board-mode">
     <div class="page-glow glow-one" aria-hidden="true"></div>
     <div class="page-glow glow-two" aria-hidden="true"></div>
 
@@ -33,10 +33,6 @@
                 <i class="fas fa-sliders" aria-hidden="true"></i>
                 <span>Gerenciar frases</span>
             </button>
-            <a class="manage-button" id="mode-link" href="monte-frase.html?modo=quadro">
-                <i class="fas fa-chalkboard" aria-hidden="true"></i>
-                <span>Modo quadro</span>
-            </a>
             <button class="sound-toggle" id="sound-toggle" type="button" aria-pressed="true">
                 <i class="fas fa-volume-high" aria-hidden="true"></i>
                 <span>Som ligado</span>
@@ -52,21 +48,9 @@
             <div class="score-card" aria-label="Pontuação da atividade">
                 <div><span>Montadas</span><strong id="score-value">0</strong></div>
                 <div class="score-divider"></div>
-                <div><span>Frase</span><strong id="round-value">1/6</strong></div>
+                <div><span>Frase</span><strong id="round-value">1/10</strong></div>
             </div>
         </section>
-
-        <nav class="level-picker" aria-label="Escolha o nível">
-            <button class="level-button active" type="button" data-level="1" aria-pressed="true">
-                <span>1</span><strong>Curtas</strong><small>3 a 4 palavras</small>
-            </button>
-            <button class="level-button" type="button" data-level="2" aria-pressed="false">
-                <span>2</span><strong>Médias</strong><small>5 palavras</small>
-            </button>
-            <button class="level-button" type="button" data-level="3" aria-pressed="false">
-                <span>3</span><strong>Longas</strong><small>6 a 7 palavras</small>
-            </button>
-        </nav>
 
         <section class="summary-card" id="access-card" role="status" aria-live="polite">
             <p class="access-message" id="access-message"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Carregando...</p>
@@ -74,14 +58,14 @@
 
         <section class="exercise-card" id="exercise-card" hidden aria-labelledby="instruction-text">
             <div class="exercise-topline">
-                <p class="instruction" id="instruction-text">Coloque as palavras na ordem certa.</p>
+                <p class="instruction" id="instruction-text">Arrume as palavras para formar a frase.</p>
                 <button class="listen-button" id="listen-prompt" type="button">
                     <i class="fas fa-volume-high" aria-hidden="true"></i>
                     Ouvir frase
                 </button>
             </div>
 
-            <div class="board-top" id="board-top" hidden>
+            <div class="board-top" id="board-top">
                 <span id="board-timer" aria-label="Tempo">0:00</span>
                 <span aria-label="Frases montadas"><i class="fas fa-check" aria-hidden="true"></i> <b id="board-score">0</b></span>
             </div>
@@ -91,40 +75,18 @@
 
             <div class="feedback" id="feedback" role="status" aria-live="polite">
                 <i class="fas fa-circle-info" aria-hidden="true"></i>
-                <span>Toque em uma palavra para colocá-la na frase.</span>
+                <span>Arraste uma palavra para o lugar certo, ou toque em duas palavras para trocá-las.</span>
             </div>
-
-            <div class="options-label">
-                <span>Palavras</span>
-                <small id="selection-hint"></small>
-            </div>
-            <div class="word-bank" id="word-bank" aria-label="Palavras embaralhadas"></div>
 
             <section class="speech-panel" id="speech-panel" hidden aria-labelledby="speech-title">
                 <h2 id="speech-title"><i class="fas fa-microphone" aria-hidden="true"></i> Agora fale a frase</h2>
-                <p class="speech-help" id="speech-help">Ouça o modelo, grave a sua voz e compare.</p>
+                <p class="speech-help" id="speech-help">Ouça o modelo e fale a frase junto.</p>
                 <div class="speech-actions">
                     <button class="speech-button" id="speech-model" type="button">
                         <i class="fas fa-volume-high" aria-hidden="true"></i> Ouvir modelo
                     </button>
                     <button class="speech-button" id="speech-slow" type="button" aria-pressed="false">
                         <i class="fas fa-gauge-simple" aria-hidden="true"></i> Devagar
-                    </button>
-                    <button class="speech-button record" id="speech-record" type="button">
-                        <i class="fas fa-microphone" aria-hidden="true"></i> <span>Gravar minha voz</span>
-                    </button>
-                    <button class="speech-button" id="speech-mine" type="button" hidden>
-                        <i class="fas fa-play" aria-hidden="true"></i> Ouvir minha voz
-                    </button>
-                </div>
-                <div class="speech-result" id="speech-result" role="status" aria-live="polite" hidden></div>
-                <div class="speech-self" id="speech-self" hidden>
-                    <span>Como ficou?</span>
-                    <button class="speech-button good" id="speech-self-good" type="button">
-                        <i class="fas fa-thumbs-up" aria-hidden="true"></i> Ficou bom
-                    </button>
-                    <button class="speech-button" id="speech-self-retry" type="button">
-                        <i class="fas fa-rotate-left" aria-hidden="true"></i> Quero tentar de novo
                     </button>
                 </div>
             </section>
@@ -133,40 +95,34 @@
                 <button class="secondary-button" id="hint-button" type="button">
                     <i class="fas fa-lightbulb" aria-hidden="true"></i> <span>Preciso de ajuda</span>
                 </button>
-                <div class="board-nav" id="board-nav" hidden>
+                <div class="board-nav" id="board-nav">
                     <button type="button" id="board-prev" aria-label="Frase anterior"><i class="fas fa-caret-left" aria-hidden="true"></i></button>
                     <strong id="board-position">1 de 10</strong>
                     <button type="button" id="board-next" aria-label="Próxima frase"><i class="fas fa-caret-right" aria-hidden="true"></i></button>
                 </div>
-                <button class="primary-button" id="next-round" type="button" disabled>
-                    Próxima <i class="fas fa-arrow-right" aria-hidden="true"></i>
-                </button>
             </div>
         </section>
 
         <section class="summary-card" id="summary-card" hidden aria-labelledby="summary-title">
-            <h2 id="summary-title"><i class="fas fa-trophy" aria-hidden="true"></i> Nível concluído</h2>
+            <h2 id="summary-title"><i class="fas fa-trophy" aria-hidden="true"></i> Frases concluídas</h2>
             <div class="summary-grid" id="summary-grid"></div>
             <table class="summary-table">
                 <thead>
-                    <tr><th>Frase</th><th id="summary-errors-heading">Erros</th><th>Pistas</th><th>Fala</th></tr>
+                    <tr><th>Frase</th><th>Movimentos</th><th>Pistas</th></tr>
                 </thead>
                 <tbody id="summary-rows"></tbody>
             </table>
-            <p class="summary-note">Este resumo é só desta sessão: nada é salvo no banco neste protótipo.</p>
+            <p class="summary-note">Este resumo é só desta sessão; nada dele é salvo.</p>
             <div class="exercise-actions">
                 <button class="secondary-button" id="summary-restart" type="button">
-                    <i class="fas fa-rotate-left" aria-hidden="true"></i> Repetir nível
-                </button>
-                <button class="primary-button" id="summary-next-level" type="button">
-                    Próximo nível <i class="fas fa-arrow-right" aria-hidden="true"></i>
+                    <i class="fas fa-rotate-left" aria-hidden="true"></i> Recomeçar
                 </button>
             </div>
         </section>
 
         <p class="accessibility-note">
             <i class="fas fa-universal-access" aria-hidden="true"></i>
-            Funciona com mouse, toque e teclado. Tentativas ilimitadas e sem cronômetro.
+            Funciona com mouse, toque e teclado. Tentativas ilimitadas; o cronômetro só mede o tempo.
         </p>
     </main>
 
@@ -242,7 +198,7 @@
         </aside>
     </div>
 
-    <script src="monte-frase.js?v=5" type="module"></script>
+    <script src="monte-frase.js?v=6" type="module"></script>
 </body>
 
 </html>
