@@ -610,8 +610,10 @@ function finishAssembly() {
     state.shownText = [item.text, ...(item.alt || [])].find(text => matchesAnOrder(placed, [sentenceWords(text)])) || item.text;
     state.completed = true;
     saveStat();
-    showFinalSentence("Muito bem! A frase está montada.");
-    speak(`Muito bem! ${state.shownText}`);
+    // Sem "Muito bem!" antes: repetido a cada frase, ficava cansativo. A voz
+    // só lê a frase montada.
+    showFinalSentence("A frase está montada.");
+    speak(state.shownText);
 }
 
 function showFinalSentence(message) {
@@ -752,10 +754,32 @@ function renderSummary() {
 }
 
 // Recomeça a lista de frases do início (entrada, "Recomeçar" e mudança no cadastro).
+// Ordem das frases sorteada a cada início, e nunca igual à da vez anterior
+// (com uma frase só, não tem o que trocar).
+let lastSentenceOrder = "";
+
+function shuffleSentences() {
+    const list = levels[1];
+    let shuffled = list;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+        shuffled = [...list];
+        for (let index = shuffled.length - 1; index > 0; index -= 1) {
+            const target = Math.floor(Math.random() * (index + 1));
+            [shuffled[index], shuffled[target]] = [shuffled[target], shuffled[index]];
+        }
+        if (shuffled.length < 2 || shuffled.map(item => item.text).join("|") !== lastSentenceOrder) break;
+    }
+    lastSentenceOrder = shuffled.map(item => item.text).join("|");
+    levels[1] = shuffled;
+}
+
+// Recomeça do início, com as frases numa ordem nova (entrada, "Recomeçar",
+// mudança no cadastro e cada vez que o app abre a atividade).
 function startLevel() {
     stopAudio();
     closeSpeechPanel();
     Object.assign(state, { level: 1, round: 0, stats: [] });
+    shuffleSentences();
     startTimer();
     renderExercise();
 }
@@ -1022,6 +1046,13 @@ window.addEventListener("message", event => {
     }
     if (event.data.type === "monte-frase:pause-audio") {
         stopAudio();
+    }
+    // O app manda isto a cada vez que o paciente abre a atividade: o iframe
+    // continua carregado entre uma abertura e outra, então sem isso a
+    // sequência (e o progresso) seriam os da vez anterior.
+    if (event.data.type === "monte-frase:restart" && accessReady && !access.blocked) {
+        closeManager();
+        startLevel();
     }
 });
 managerOverlay.addEventListener("click", event => { if (event.target === managerOverlay) closeManager(); });
