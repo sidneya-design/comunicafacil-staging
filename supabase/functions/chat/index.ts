@@ -93,20 +93,33 @@ Deno.serve(async (req) => {
       const { messages, generateAudio, ttsText, ttsRate } = await req.json();
 
       // TTS puro (botão de som dos exercícios): só sintetiza o texto recebido,
-      // sem passar pelo agente de IA. Usa o edge-tts gratuito; se o serviço
-      // não-oficial falhar e houver chave, cai no Azure TTS.
+      // sem passar pelo agente de IA. Ordem: Google Cloud TTS (se configurado),
+      // edge-tts gratuito, e por último o Azure TTS se houver chave.
       // ttsRate (opcional): ajuste de velocidade via SSML <prosody rate>, usado
       // pelo seletor de velocidade do exercício "Leitura de Texto" — sintetizado
       // já na velocidade certa (evita o efeito robótico de esticar o áudio no
       // navegador via playbackRate). Sem ttsRate, mantém o -15% padrão de sempre.
       if (ttsText) {
-        let audioBase64: string;
-        try {
-          audioBase64 = encodeBase64(await edgeTtsSynthesize(cleanTextForSpeech(ttsText), undefined, ttsRate));
-        } catch (edgeError) {
-          console.error("edge-tts falhou, tentando Azure:", (edgeError as Error).message);
-          if (!apiKey) throw edgeError;
-          audioBase64 = await synthesizeTextWithAzure(ttsText, apiKey);
+        let audioBase64: string | null = null;
+        // 1º Google Cloud TTS, se o secret GOOGLE_TTS_API_KEY existir no projeto
+        // (vozes Chirp 3 HD dentro da cota grátis mensal); qualquer erro cai no
+        // edge-tts de sempre, então sem a chave nada muda.
+        const googleKey = Deno.env.get("GOOGLE_TTS_API_KEY");
+        if (googleKey) {
+          try {
+            audioBase64 = await synthesizeTextWithGoogle(cleanTextForSpeech(ttsText), googleKey, ttsRate);
+          } catch (googleError) {
+            console.error("Google TTS falhou, usando edge-tts:", (googleError as Error).message);
+          }
+        }
+        if (!audioBase64) {
+          try {
+            audioBase64 = encodeBase64(await edgeTtsSynthesize(cleanTextForSpeech(ttsText), undefined, ttsRate));
+          } catch (edgeError) {
+            console.error("edge-tts falhou, tentando Azure:", (edgeError as Error).message);
+            if (!apiKey) throw edgeError;
+            audioBase64 = await synthesizeTextWithAzure(ttsText, apiKey);
+          }
         }
         return new Response(
           JSON.stringify({ audio: audioBase64 }),
@@ -216,6 +229,37 @@ export function cleanTextForSpeech(text: string): string {
     .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{20E3}\u{1F1E6}-\u{1F1FF}]/gu, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+// Helper: Google Cloud Text-to-Speech. Voz configurável pelo secret
+// GOOGLE_TTS_VOICE (padrão: Chirp 3 HD feminina em pt-BR). ttsRate chega no
+// formato do SSML ("-15%", "+10%"); sem ele, -15% como no edge-tts, pra manter
+// o ritmo mais calmo de sempre.
+async function synthesizeTextWithGoogle(text: string, apiKey: string, ttsRate?: string): Promise<string> {
+  const voiceName = Deno.env.get("GOOGLE_TTS_VOICE") || "pt-BR-Chirp3-HD-Kore";
+  const ratePercent = Number.parseFloat(String(ttsRate ?? "-15%").replace("%", ""));
+  const speakingRate = Number.isFinite(ratePercent) ? Math.min(2, Math.max(0.25, 1 + ratePercent / 100)) : 0.85;
+
+  const request = async (withRate: boolean) => fetch("https://texttospeech.googleapis.com/v1/text:synthesize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey },
+    body: JSON.stringify({
+      input: { text },
+      voice: { languageCode: "pt-BR", name: voiceName },
+      audioConfig: withRate ? { audioEncoding: "MP3", speakingRate } : { audioEncoding: "MP3" },
+    }),
+  });
+
+  // Algumas famílias de voz não aceitam speakingRate: tenta de novo sem ele
+  // antes de desistir do Google.
+  let response = await request(true);
+  if (response.status === 400) response = await request(false);
+  if (!response.ok) {
+    throw new Error(`Google TTS respondeu ${response.status}: ${(await response.text()).slice(0, 300)}`);
+  }
+  const data = await response.json();
+  if (!data.audioContent) throw new Error("Google TTS não devolveu áudio.");
+  return data.audioContent; // já vem em base64
 }
 
 function escapeXmlText(text: string): string {
