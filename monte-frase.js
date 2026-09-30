@@ -58,6 +58,18 @@ const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname
 const access = { remote: false, role: null, userId: null, companyId: null, canManage: false, blocked: null, containerId: null, configItemId: null };
 let supabase = null;
 let custom = { onlyCustom: false, sentences: [] };
+// Frases de base, que entram antes das da clínica: as 10 prontas deste
+// arquivo ou, se o admin cadastrou frases no banco global, as dele (só elas,
+// se o admin marcou "usar só as minhas frases"). É assim que o conteúdo do
+// admin chega aos médicos e aos pacientes deles.
+let baseSentences = boardSentences;
+let baseFromAdmin = false;
+
+function applyAdminBase(parsed) {
+    if (!parsed?.sentences.length) return;
+    baseSentences = parsed.onlyCustom ? parsed.sentences : [...boardSentences, ...parsed.sentences];
+    baseFromAdmin = true;
+}
 
 function loadLocalCustom() {
     try {
@@ -153,12 +165,19 @@ async function initAccess() {
                 custom = { onlyCustom: parsed.onlyCustom, sentences: parsed.sentences };
                 access.configItemId = parsed.configItemId;
             }
+            if (access.role === "doctor") {
+                // O médico lê o banco global do admin (a RLS libera conteúdo
+                // global pra médico) e usa como base, no lugar das prontas.
+                const { data: adminBank } = await supabase.from("exercises").select("id").eq("seed_key", SEED_KEY).maybeSingle();
+                if (adminBank) applyAdminBase(await fetchContainerItems(adminBank.id));
+            }
             return;
         }
 
-        // Paciente: a RLS só devolve containers que o médico liberou pra ele.
-        // Ordem: banco da clínica, banco só do médico (médico sem empresa) e,
-        // se nenhum tiver frases, o global do admin (quando também liberado).
+        // Paciente: a RLS só devolve containers que o médico liberou pra ele
+        // (ao liberar o Monte a Frase, o app libera junto o banco do admin).
+        // Frases da clínica (ou do banco só do médico, se ele não tem empresa)
+        // entram sobre a base: as do admin, se liberadas, senão as prontas.
         const { data: patientRow } = await supabase.from("patients").select("doctor_user_id, company_id").eq("user_id", access.userId).maybeSingle();
         const keys = [];
         if (patientRow?.company_id) keys.push(companyScopedSeedKey(patientRow.company_id));
@@ -169,7 +188,9 @@ async function initAccess() {
             access.blocked = "Este exercício ainda não foi liberado para você. Fale com o seu médico.";
             return;
         }
-        for (const key of keys) {
+        const adminBank = containers.find(row => row.seed_key === SEED_KEY);
+        if (adminBank) applyAdminBase(await fetchContainerItems(adminBank.id));
+        for (const key of keys.filter(key => key !== SEED_KEY)) {
             const container = containers.find(row => row.seed_key === key);
             if (!container) continue;
             const parsed = await fetchContainerItems(container.id);
@@ -284,7 +305,7 @@ async function persistOnlyCustom(value) {
 
 function buildLevels() {
     const useDefaults = !(custom.onlyCustom && custom.sentences.length);
-    return { 1: [...(useDefaults ? boardSentences : []), ...custom.sentences] };
+    return { 1: [...(useDefaults ? baseSentences : []), ...custom.sentences] };
 }
 
 let levels = buildLevels();
@@ -866,7 +887,10 @@ function renderSentenceLibrary() {
     if (!custom.sentences.length) {
         const empty = document.createElement("div");
         empty.className = "question-empty";
-        empty.innerHTML = `<i class="fas fa-inbox" aria-hidden="true"></i><strong>Nenhuma frase cadastrada</strong><span>As frases prontas já estão disponíveis.</span>`;
+        empty.innerHTML = `<i class="fas fa-inbox" aria-hidden="true"></i><strong>Nenhuma frase cadastrada</strong><span></span>`;
+        empty.querySelector("span").textContent = baseFromAdmin
+            ? `As ${baseSentences.length} frases do admin já estão disponíveis.`
+            : "As frases prontas já estão disponíveis.";
         list.appendChild(empty);
         return;
     }

@@ -14199,16 +14199,25 @@ async function openPatientExercisesModal(patient) {
     // na lista, não precisa do placeholder virtual (evita duplicar a mesma
     // atividade duas vezes no modal).
     const existingSeedKeys = new Set((myExercises || []).map(ex => ex.seedKey || ex.seed_key));
+    // Monte a Frase (ownSeedKey) sempre aparece pelo banco da clínica: o banco
+    // do admin não é uma linha à parte, é liberado junto (ver o clique abaixo).
     const virtualEntries = activityPlaceholders
-        .filter(p => !existingSeedKeys.has(p.baseSeedKey) && !existingSeedKeys.has(p.ownSeedKey || doctorScopedSeedKey(p.baseSeedKey, currentUserId)))
+        .filter(p => p.ownSeedKey
+            ? !existingSeedKeys.has(p.ownSeedKey)
+            : !existingSeedKeys.has(p.baseSeedKey) && !existingSeedKeys.has(doctorScopedSeedKey(p.baseSeedKey, currentUserId)))
         .map(p => ({ id: null, title: p.title, doctor_user_id: currentUserId, baseSeedKey: p.baseSeedKey, ownSeedKey: p.ownSeedKey }));
 
     // Com banco da clínica, um banco antigo só do médico (de antes dele entrar
     // numa empresa) não aparece mais pra liberar — duplicaria o Monte a Frase.
     const legacyMonteFraseKey = currentUserCompanyId ? doctorScopedSeedKey(MONTE_FRASE_SEED_KEY, currentUserId) : null;
+    // Banco do admin do Monte a Frase: as frases dele são a base do exercício
+    // pra todos, então ele é liberado junto com o Monte a Frase da clínica em
+    // vez de aparecer como "Monte a Frase (do admin)" separado.
+    const adminMonteFraseContainer = (myExercises || []).find(ex => (ex.seedKey || ex.seed_key) === MONTE_FRASE_SEED_KEY) || null;
     const allEntries = [...(myExercises || []), ...virtualEntries]
         .filter(ex => monteFrasePublished || !isGameContainerSeedKey(ex.seedKey || ex.seed_key, MONTE_FRASE_SEED_KEY))
-        .filter(ex => !legacyMonteFraseKey || (ex.seedKey || ex.seed_key) !== legacyMonteFraseKey);
+        .filter(ex => !legacyMonteFraseKey || (ex.seedKey || ex.seed_key) !== legacyMonteFraseKey)
+        .filter(ex => ex !== adminMonteFraseContainer);
 
     list.innerHTML = '';
     if (!allEntries.length) {
@@ -14255,6 +14264,12 @@ async function openPatientExercisesModal(patient) {
                 const { error: upsertErr } = await supabaseClient.from('patient_exercise_flags')
                     .upsert({ patient_id: patient.id, exercise_id: exerciseId, visible: newVisible, updated_at: new Date().toISOString() });
                 if (upsertErr) throw upsertErr;
+                const isMonteFrase = isGameContainerSeedKey(ex.seedKey || ex.seed_key || ex.ownSeedKey, MONTE_FRASE_SEED_KEY);
+                if (isMonteFrase && adminMonteFraseContainer) {
+                    const { error: adminFlagErr } = await supabaseClient.from('patient_exercise_flags')
+                        .upsert({ patient_id: patient.id, exercise_id: adminMonteFraseContainer.id, visible: newVisible, updated_at: new Date().toISOString() });
+                    if (adminFlagErr) throw adminFlagErr;
+                }
                 logAdminAction(newVisible ? 'release' : 'unrelease', 'exercise', displayTitle, `Paciente: ${patient.name || patient.email}`);
                 // Recarrega com o novo estado, mas preservando a rolagem — a
                 // lista pode ter dezenas de itens, e sem isso cada clique
