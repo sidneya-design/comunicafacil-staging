@@ -6899,9 +6899,9 @@ function baseSeedKeyForGameTile(gameId) {
 }
 
 function hasReleasedGameContent(baseSeedKey) {
-    const scopedKey = currentPatientDoctorUserId ? doctorScopedSeedKey(baseSeedKey, currentPatientDoctorUserId) : null;
+    const keys = [baseSeedKey, ...patientGameSeedKeys(baseSeedKey)];
     return lastMergedExercises.some(ex =>
-        (ex.seedKey === baseSeedKey || (scopedKey && ex.seedKey === scopedKey)) &&
+        keys.includes(ex.seedKey) &&
         ex.items && ex.items.length > 0
     );
 }
@@ -8407,7 +8407,7 @@ function serializeJogo2CardItem(card, exerciseId) {
 async function getOrCreateJogo2CardsContainer(doctorUserId = null) {
     if (supabaseClient) {
         const container = doctorUserId
-            ? await getOrCreateGameContainer(doctorScopedSeedKey(JOGO2_CARDS_SEED_KEY, doctorUserId), JOGO2_CARDS_TITLE, doctorUserId)
+            ? await getOrCreateGameContainer(ownGameSeedKey(JOGO2_CARDS_SEED_KEY), JOGO2_CARDS_TITLE, doctorUserId)
             : await getOrCreateGameContainer(JOGO2_CARDS_SEED_KEY, JOGO2_CARDS_TITLE);
         if (container && container.fromSupabase) {
             const { data, error } = await supabaseClient
@@ -8450,17 +8450,17 @@ async function getOrCreateJogo2CardsContainer(doctorUserId = null) {
 // container do médico do paciente logado; se não existir ou estiver vazio,
 // cai pro container global de sempre, sem mudança nenhuma nesse caminho.
 async function getJogo2ContainerForPlay() {
-    if (supabaseClient && currentPatientId && currentPatientDoctorUserId) {
-        try {
-            const scopedSeedKey = doctorScopedSeedKey(JOGO2_CARDS_SEED_KEY, currentPatientDoctorUserId);
-            const { data: container } = await supabaseClient.from('exercises').select('*').eq('seed_key', scopedSeedKey).maybeSingle();
-            if (container) {
+    if (supabaseClient && currentPatientId) {
+        for (const scopedSeedKey of patientGameSeedKeys(JOGO2_CARDS_SEED_KEY)) {
+            try {
+                const { data: container } = await supabaseClient.from('exercises').select('*').eq('seed_key', scopedSeedKey).maybeSingle();
+                if (!container) continue;
                 const { data: items } = await supabaseClient
                     .from('exercise_items').select('*').eq('exercise_id', container.id).eq('role', JOGO2_CARD_ROLE).order('id', { ascending: true });
                 const mapped = (items || []).map(parseJogo2CardItem);
                 if (mapped.length > 0) return { ...container, fromSupabase: true, items: mapped };
-            }
-        } catch (e) {}
+            } catch (e) {}
+        }
     }
     return getOrCreateJogo2CardsContainer();
 }
@@ -10723,7 +10723,50 @@ function doctorScopedSeedKey(baseSeedKey, doctorUserId) {
     return `${baseSeedKey}:doctor:${doctorUserId}`;
 }
 
+// Banco da CLÍNICA: um container por empresa, compartilhado por todos os
+// médicos dela (lê/edita via RLS "banco da empresa", pelo company_id). É o
+// que deixa um médico novo ou substituto ver tudo o que os colegas já
+// cadastraram — mesma ideia dos exercícios de slides/sílabas do médico.
+function companyScopedSeedKey(baseSeedKey, companyId) {
+    return `${baseSeedKey}:company:${companyId}`;
+}
+
+// Container em que o médico logado cadastra: o da clínica, ou um só dele se
+// ainda não estiver em nenhuma empresa.
+function ownGameSeedKey(baseSeedKey) {
+    return currentUserCompanyId
+        ? companyScopedSeedKey(baseSeedKey, currentUserCompanyId)
+        : doctorScopedSeedKey(baseSeedKey, currentUserId);
+}
+
+// Containers que o paciente logado pode usar, em ordem de preferência: o da
+// clínica e depois o banco antigo só do médico dele. O global do admin fica
+// a cargo de quem chama.
+function patientGameSeedKeys(baseSeedKey) {
+    const keys = [];
+    if (currentPatientCompanyId) keys.push(companyScopedSeedKey(baseSeedKey, currentPatientCompanyId));
+    if (currentPatientDoctorUserId) keys.push(doctorScopedSeedKey(baseSeedKey, currentPatientDoctorUserId));
+    return keys;
+}
+
 async function getOrCreateGameContainer(seedKey, title, doctorUserId = null) {
+    if (supabaseClient && doctorUserId && seedKey.includes(':company:')) {
+        // Banco da clínica: o dono pode ser outro médico da empresa, então a
+        // busca é só pela seed_key (única). Se dois colegas criarem ao mesmo
+        // tempo, o insert do segundo falha e ele usa o do primeiro.
+        const findExisting = async () => {
+            const { data, error } = await supabaseClient.from('exercises').select('*').eq('seed_key', seedKey).maybeSingle();
+            return !error && data ? { ...data, fromSupabase: true, seedKey, visible: data.visible !== undefined ? data.visible !== false : false } : null;
+        };
+        const existing = await findExisting();
+        if (existing) return existing;
+        const { data: created, error: insertErr } = await supabaseClient.from('exercises')
+            .insert([{ title, visible: false, seed_key: seedKey, doctor_user_id: doctorUserId, company_id: currentUserCompanyId }])
+            .select().single();
+        if (!insertErr && created) return { ...created, fromSupabase: true, seedKey };
+        return findExisting();
+    }
+
     if (supabaseClient && doctorUserId) {
         // Container do próprio médico: busca só por (seed_key, doctor_user_id)
         // e, se não achar, insere direto com os dois já setados — pula
@@ -10832,11 +10875,17 @@ function isGameContainerSeedKey(seedKey, baseSeedKey) {
 // - qualquer outro caso (admin, por exemplo): container global, como sempre.
 function resolveGameContainer(baseSeedKey) {
     if (isDoctor && currentUserId) {
-        return lastMergedExercises.find(ex => ex.seedKey === doctorScopedSeedKey(baseSeedKey, currentUserId)) || null;
+        // Banco da clínica; enquanto ele não existir, o banco antigo só do
+        // médico (de antes do banco por clínica) continua aparecendo.
+        return lastMergedExercises.find(ex => ex.seedKey === ownGameSeedKey(baseSeedKey))
+            || lastMergedExercises.find(ex => ex.seedKey === doctorScopedSeedKey(baseSeedKey, currentUserId))
+            || null;
     }
-    if (currentPatientId && currentPatientDoctorUserId) {
-        const own = lastMergedExercises.find(ex => ex.seedKey === doctorScopedSeedKey(baseSeedKey, currentPatientDoctorUserId));
-        if (own && own.items && own.items.length > 0) return own;
+    if (currentPatientId) {
+        for (const key of patientGameSeedKeys(baseSeedKey)) {
+            const own = lastMergedExercises.find(ex => ex.seedKey === key);
+            if (own && own.items && own.items.length > 0) return own;
+        }
     }
     return lastMergedExercises.find(ex => ex.seedKey === baseSeedKey) || null;
 }
@@ -10862,7 +10911,7 @@ function makePairId() {
 // médico autorando usa o próprio container; admin usa o global de sempre.
 function getMemoryContainer() {
     return isDoctor && currentUserId
-        ? getOrCreateGameContainer(doctorScopedSeedKey(MEMORY_CARDS_SEED_KEY, currentUserId), MEMORY_CARDS_TITLE, currentUserId)
+        ? getOrCreateGameContainer(ownGameSeedKey(MEMORY_CARDS_SEED_KEY), MEMORY_CARDS_TITLE, currentUserId)
         : getOrCreateGameContainer(MEMORY_CARDS_SEED_KEY, MEMORY_CARDS_TITLE);
 }
 
@@ -11342,7 +11391,7 @@ const ALPHABET_MEMORY_TITLE = 'Cartas do Jogo da Memória do Alfabeto|green';
 // Mesmo padrão de getMemoryContainer (Fase 15).
 function getAlphabetMemoryContainer() {
     return isDoctor && currentUserId
-        ? getOrCreateGameContainer(doctorScopedSeedKey(ALPHABET_MEMORY_SEED_KEY, currentUserId), ALPHABET_MEMORY_TITLE, currentUserId)
+        ? getOrCreateGameContainer(ownGameSeedKey(ALPHABET_MEMORY_SEED_KEY), ALPHABET_MEMORY_TITLE, currentUserId)
         : getOrCreateGameContainer(ALPHABET_MEMORY_SEED_KEY, ALPHABET_MEMORY_TITLE);
 }
 
@@ -11752,28 +11801,7 @@ const COMPLETE_FRASE_TITLE = 'Complete a Frase|orange';
 const MONTE_FRASE_SEED_KEY = 'monte-frase-container';
 const MONTE_FRASE_TITLE = 'Monte a Frase|blue';
 
-// Banco do Monte a Frase do médico logado: o da clínica (todos os médicos da
-// empresa compartilham, então médico novo ou substituto vê tudo), ou um só
-// dele se não tiver empresa. Mesma regra de monte-frase.js (ownSeedKey).
-function monteFraseOwnSeedKey() {
-    return currentUserCompanyId
-        ? `${MONTE_FRASE_SEED_KEY}:company:${currentUserCompanyId}`
-        : doctorScopedSeedKey(MONTE_FRASE_SEED_KEY, currentUserId);
-}
 
-// getOrCreateGameContainer procura por (seed_key, doctor_user_id) — no banco
-// da clínica o dono pode ser outro médico, então aqui a busca é só pela
-// seed_key (única), e o insert leva company_id pros colegas enxergarem.
-async function getOrCreateMonteFraseContainer(seedKey) {
-    const findExisting = async () => (await supabaseClient.from('exercises').select('*').eq('seed_key', seedKey).maybeSingle()).data;
-    const existing = await findExisting();
-    if (existing) return existing;
-    const payload = { title: MONTE_FRASE_TITLE, visible: false, seed_key: seedKey, doctor_user_id: currentUserId };
-    if (seedKey.includes(':company:')) payload.company_id = currentUserCompanyId;
-    const { data: created, error } = await supabaseClient.from('exercises').insert([payload]).select().single();
-    if (!error) return created;
-    return findExisting(); // um colega pode ter criado ao mesmo tempo
-}
 
 function makeNamingSetId() {
     return 'naming-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
@@ -12978,6 +13006,7 @@ let canManageUsers = false;
 let isDoctor = false; // Papel "doctor": gerencia só os próprios pacientes, não conteúdo geral
 let currentPatientId = null; // Preenchido quando o papel logado é "patient"
 let currentPatientDoctorUserId = null; // doctor_user_id do próprio médico do paciente logado (resolveGameContainer)
+let currentPatientCompanyId = null; // empresa do paciente logado — acha o banco da clínica dos jogos (patientGameSeedKeys)
 let currentUserId = null; // uuid do usuário logado, pra saber "isso é meu?" (banco de exercícios do médico)
 let currentUserCompanyId = null; // company_id do médico logado (company_members) — grava em tudo que ele cria, pra outros médicos da mesma empresa também verem (RLS já suporta isso via can_view_*, só faltava o app preencher)
 
@@ -13064,9 +13093,10 @@ if (supabaseClient) {
 
             if (role === 'patient') {
                 const { data: patientRow } = await supabaseClient
-                    .from('patients').select('id, doctor_user_id').eq('user_id', userId).maybeSingle();
+                    .from('patients').select('id, doctor_user_id, company_id').eq('user_id', userId).maybeSingle();
                 currentPatientId = patientRow?.id || null;
                 currentPatientDoctorUserId = patientRow?.doctor_user_id || null;
+                currentPatientCompanyId = patientRow?.company_id || null;
             }
             startUsageSession({
                 id: userId,
@@ -14184,13 +14214,14 @@ async function openPatientExercisesModal(patient) {
     // médico liberar. Reconhecimento de Palavras/Imagem saíram daqui (Fase
     // 24): agora são vários decks reais, criados explicitamente, já
     // aparecem em myExercises normalmente.
+    // ownSeedKey: banco da clínica (ou só do médico, se ele não tem empresa).
     const activityPlaceholders = [
-        { baseSeedKey: COMPLETE_FRASE_SEED_KEY, title: COMPLETE_FRASE_TITLE },
+        { baseSeedKey: COMPLETE_FRASE_SEED_KEY, title: COMPLETE_FRASE_TITLE, ownSeedKey: ownGameSeedKey(COMPLETE_FRASE_SEED_KEY) },
     ];
     // Monte a Frase só entra na lista de liberação depois que o admin
     // publicou a atividade; antes disso o médico nem a enxerga.
     const monteFrasePublished = isAdmin || await getGameVisibility('monte-frase');
-    if (monteFrasePublished) activityPlaceholders.push({ baseSeedKey: MONTE_FRASE_SEED_KEY, title: MONTE_FRASE_TITLE, ownSeedKey: monteFraseOwnSeedKey() });
+    if (monteFrasePublished) activityPlaceholders.push({ baseSeedKey: MONTE_FRASE_SEED_KEY, title: MONTE_FRASE_TITLE, ownSeedKey: ownGameSeedKey(MONTE_FRASE_SEED_KEY) });
     // Container já pode existir como global (admin cadastrou direto) OU como
     // banco do próprio médico — nos dois casos já tem uma linha de verdade
     // na lista, não precisa do placeholder virtual (evita duplicar a mesma
@@ -14200,12 +14231,16 @@ async function openPatientExercisesModal(patient) {
         .filter(p => !existingSeedKeys.has(p.baseSeedKey) && !existingSeedKeys.has(p.ownSeedKey || doctorScopedSeedKey(p.baseSeedKey, currentUserId)))
         .map(p => ({ id: null, title: p.title, doctor_user_id: currentUserId, baseSeedKey: p.baseSeedKey, ownSeedKey: p.ownSeedKey }));
 
-    // Com banco da clínica, um banco antigo só do médico (de antes dele entrar
-    // numa empresa) não aparece mais pra liberar — duplicaria o Monte a Frase.
-    const legacyMonteFraseKey = currentUserCompanyId ? doctorScopedSeedKey(MONTE_FRASE_SEED_KEY, currentUserId) : null;
+    // Com banco da clínica, os bancos antigos só do médico (de antes do banco
+    // por clínica; a migração 20260930000000 move o conteúdo e as liberações)
+    // não aparecem mais pra liberar — duplicariam a mesma atividade.
+    const legacyDoctorKeys = currentUserCompanyId
+        ? new Set([MEMORY_CARDS_SEED_KEY, ALPHABET_MEMORY_SEED_KEY, JOGO2_CARDS_SEED_KEY, COMPLETE_FRASE_SEED_KEY, MONTE_FRASE_SEED_KEY]
+            .map(base => doctorScopedSeedKey(base, currentUserId)))
+        : new Set();
     const allEntries = [...(myExercises || []), ...virtualEntries]
         .filter(ex => monteFrasePublished || !isGameContainerSeedKey(ex.seedKey || ex.seed_key, MONTE_FRASE_SEED_KEY))
-        .filter(ex => !legacyMonteFraseKey || (ex.seedKey || ex.seed_key) !== legacyMonteFraseKey);
+        .filter(ex => !legacyDoctorKeys.has(ex.seedKey || ex.seed_key));
 
     list.innerHTML = '';
     if (!allEntries.length) {
@@ -14241,11 +14276,9 @@ async function openPatientExercisesModal(patient) {
                     // Primeira liberação desta atividade: cria o container
                     // vazio do médico agora (mesmo get-or-create que
                     // startNamingGame/startAfasiaGame/complete-frase usam).
-                    const container = ex.ownSeedKey
-                        ? await getOrCreateMonteFraseContainer(ex.ownSeedKey)
-                        : await getOrCreateGameContainer(
-                            doctorScopedSeedKey(ex.baseSeedKey, currentUserId), ex.title, currentUserId
-                        );
+                    const container = await getOrCreateGameContainer(
+                        ex.ownSeedKey || doctorScopedSeedKey(ex.baseSeedKey, currentUserId), ex.title, currentUserId
+                    );
                     if (!container) throw new Error('Não consegui criar o container do exercício.');
                     exerciseId = container.id;
                 }
