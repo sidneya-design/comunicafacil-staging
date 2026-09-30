@@ -3824,7 +3824,10 @@ function renderExerciseCards(exercisesArray) {
     // é onde existe esse conceito por paciente; fora daí fica escondido.
     const filterBar = document.getElementById('exercise-filter-bar');
     const filterStatusSelect = document.getElementById('exercise-filter-status');
-    if (filterBar) filterBar.style.display = 'flex';
+    // Uma nova renderização enquanto há atividade aberta (grade escondida por
+    // openGame) não pode trazer a busca de volta por cima da atividade.
+    const gridHidden = container.style.display === 'none';
+    if (filterBar) filterBar.style.display = gridHidden ? 'none' : 'flex';
     if (filterStatusSelect) filterStatusSelect.style.display = inDoctorPatientContext ? '' : 'none';
 
     if (exerciseFilterQuery.trim()) {
@@ -7042,6 +7045,9 @@ function openGame(gameId) {
     if (isExerciseActivity) {
         document.getElementById('grid-exercises').style.display = 'none';
         document.getElementById('exercises-header').style.display = 'none';
+        // A busca filtra a grade de cards; com uma atividade aberta ela só ocupa espaço.
+        const exerciseFilterBar = document.getElementById('exercise-filter-bar');
+        if (exerciseFilterBar) exerciseFilterBar.style.display = 'none';
         document.getElementById('btn-exercises-back').style.display = 'flex';
     } else {
         document.getElementById('grid-games-list').style.display = 'none';
@@ -7140,6 +7146,9 @@ function closeGame() {
 
     const elExercises = document.getElementById('grid-exercises');
     if (elExercises) elExercises.style.display = 'grid';
+
+    const elExerciseFilterBar = document.getElementById('exercise-filter-bar');
+    if (elExerciseFilterBar) elExerciseFilterBar.style.display = 'flex';
 
     const elGamesBack = document.getElementById('btn-games-back');
     if (elGamesBack) elGamesBack.style.display = 'none';
