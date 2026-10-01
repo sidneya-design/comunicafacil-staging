@@ -13341,16 +13341,11 @@ function showAvatarIn(img, placeholder, url) {
     else img.removeAttribute('src');
 }
 
+// Nome completo cadastrado (paciente: o que o médico cadastrou; médico/admin:
+// o nome da conta). Sem nome, fica vazio — nunca o e-mail.
 function userDisplayName(session) {
     const meta = session?.user?.user_metadata || {};
-    const fullName = (currentPatientName || meta.full_name || meta.name || '').trim();
-    if (fullName) return fullName;
-    return (session?.user?.email || '').split('@')[0];
-}
-
-// Nome curto pro "Olá": primeiro nome (o completo fica no Meu perfil).
-function userFirstName(session) {
-    return userDisplayName(session).split(/\s+/)[0] || 'você';
+    return (currentPatientName || meta.full_name || meta.name || '').trim().replace(/\s+/g, ' ');
 }
 
 function updateUserBarVisibility() {
@@ -13372,7 +13367,9 @@ async function refreshUserAvatar() {
 function initUserBar(session) {
     userBarSession = session || null;
     if (!userBarSession) return;
-    document.getElementById('user-greeting-name').textContent = userFirstName(userBarSession);
+    const name = userDisplayName(userBarSession);
+    document.querySelector('.user-greeting').innerHTML = name ? 'Olá, <strong id="user-greeting-name"></strong>' : 'Olá!';
+    if (name) document.getElementById('user-greeting-name').textContent = name;
     updateUserBarVisibility();
     refreshUserAvatar();
 }
@@ -13415,7 +13412,7 @@ function setProfileStatus(id, text, isError = false) {
 document.getElementById('btn-user-profile')?.addEventListener('click', () => {
     closeUserMenu();
     if (!userBarSession) return;
-    document.getElementById('profile-name').textContent = userDisplayName(userBarSession);
+    document.getElementById('profile-name').textContent = userDisplayName(userBarSession) || 'Nome não cadastrado';
     document.getElementById('profile-email').textContent = userBarSession.user.email || '';
     setProfileStatus('profile-photo-status', '');
     setProfileStatus('profile-password-done', '');
