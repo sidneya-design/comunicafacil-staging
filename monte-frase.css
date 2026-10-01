@@ -84,7 +84,11 @@ body.embedded-mode .speech-button { min-height: 46px; }
 .board-word.locked:hover { background: none; }
 .board-mode .final-sentence { width: auto; color: var(--green); text-align: left; line-height: var(--row); }
 
-.board-nav { display: flex; align-items: center; gap: 14px; margin-left: auto; font-size: 1.5rem; color: #4b4b4b; }
+/* Navegação entre frases no centro da barra; "Preciso de ajuda" fica à
+   esquerda (e, quando some depois de montar, a navegação continua no meio). */
+body.board-mode .exercise-actions { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+body.board-mode #hint-button { grid-column: 1; grid-row: 1; justify-self: start; }
+.board-nav { display: flex; align-items: center; gap: 14px; grid-column: 2; grid-row: 1; font-size: 1.5rem; color: #4b4b4b; }
 .board-nav button { display: grid; place-items: center; width: 54px; height: 54px; color: #4b4b4b; background: #f1eef5; border: 0; border-radius: 14px; font-size: 1.7rem; cursor: pointer; }
 .board-nav button:disabled { opacity: .35; cursor: not-allowed; }
 
@@ -151,6 +155,8 @@ body.embedded-mode .speech-button { min-height: 46px; }
 
 
 @media (max-width: 620px) {
+    body.board-mode .exercise-actions { grid-template-columns: 1fr; row-gap: 12px; }
+    .board-nav { grid-column: 1; grid-row: 2; justify-self: center; }
     .listen-button.visible { display: inline-flex; }
     .speech-button { flex: 1 1 46%; justify-content: center; }
     .summary-grid { grid-template-columns: repeat(2, 1fr); }
