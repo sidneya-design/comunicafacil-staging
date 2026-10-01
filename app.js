@@ -14220,7 +14220,7 @@ async function openPatientExercisesModal(patient) {
     // 21: conteúdo global deixou de ser automático pro paciente — o médico
     // precisa liberar também, mesma lista/mecanismo do banco próprio).
     const { data: myExercises } = await supabaseClient
-        .from('exercises').select('id, title, seed_key, doctor_user_id')
+        .from('exercises').select('id, title, seed_key, doctor_user_id, game_kind')
         .or(doctorBankOrFilter())
         .order('title');
     const { data: overrides } = await supabaseClient
@@ -14247,7 +14247,10 @@ async function openPatientExercisesModal(patient) {
         .filter(p => !existingSeedKeys.has(p.baseSeedKey) && !existingSeedKeys.has(doctorScopedSeedKey(p.baseSeedKey, currentUserId)))
         .map(p => ({ id: null, title: p.title, doctor_user_id: currentUserId, baseSeedKey: p.baseSeedKey }));
 
-    const allEntries = [...(myExercises || []), ...virtualEntries];
+    // Os bancos únicos do Monte a Frase de antes dos conjuntos ficaram no
+    // banco sem conversão (decisão do usuário) — não aparecem pra liberar.
+    const allEntries = [...(myExercises || []), ...virtualEntries]
+        .filter(ex => !isGameContainerSeedKey(ex.seed_key, MONTE_FRASE_SEED_KEY));
 
     list.innerHTML = '';
     if (!allEntries.length) {
@@ -14265,6 +14268,14 @@ async function openPatientExercisesModal(patient) {
 
         const label = document.createElement('span');
         label.textContent = displayTitle;
+        // Conjunto do Monte a Frase tem nome livre ("teste", "Na cozinha"):
+        // a etiqueta diz de que exercício se trata.
+        if (ex.game_kind === 'monte-frase') {
+            const tag = document.createElement('span');
+            tag.className = 'release-kind-tag';
+            tag.textContent = 'Monte a Frase';
+            label.prepend(tag);
+        }
 
         const toggleWrap = document.createElement('div');
         toggleWrap.style.cssText = 'position:relative; width:32px; height:18px;';
