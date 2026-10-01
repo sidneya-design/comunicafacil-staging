@@ -2245,6 +2245,28 @@
         </div>
     </div>
 
+    <!-- Modal: Novo conjunto do Monte a Frase -->
+    <div class="modal-overlay" id="new-monte-frase-modal" role="dialog" aria-modal="true" aria-labelledby="new-monte-frase-modal-title">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="new-monte-frase-modal-title">Novo conjunto do Monte a Frase</h2>
+                <button class="close-modal-btn" id="btn-close-new-monte-frase" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
+            </div>
+            <form id="new-monte-frase-form">
+                <div class="form-group">
+                    <label for="new-monte-frase-name">Nome do conjunto</label>
+                    <input type="text" id="new-monte-frase-name" required maxlength="60" placeholder="Ex: Na cozinha, Dia a dia" autocomplete="off">
+                </div>
+                <p class="media-hint">Depois de criar, você já cadastra as frases deste conjunto.</p>
+                <div id="new-monte-frase-error" class="admin-feedback error" style="display:none;"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" id="btn-cancel-new-monte-frase">Cancelar</button>
+                    <button type="submit" class="btn-primary" id="btn-submit-new-monte-frase">Criar conjunto</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Modal: Novo Usuário (Admin) -->
     <div class="modal-overlay" id="new-user-modal" role="dialog" aria-modal="true" aria-labelledby="new-user-modal-title">
         <div class="modal-content">
@@ -2395,7 +2417,7 @@
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=103"></script>
+    <script defer src="app.js?v=104"></script>
 </body>
 
 
