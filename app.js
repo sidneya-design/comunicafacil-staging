@@ -3910,7 +3910,9 @@ function renderExerciseCards(exercisesArray) {
         // Selo de vídeo: exercício de slides pode ter link de vídeo em
         // qualquer um dos itens, não só no primeiro — sem esse selo não dava
         // pra saber, olhando a grade, quais decks tinham vídeo escondido.
-        const hasVideo = (ex.items || []).some(item => !!(item.videoLink || item.link));
+        // Monte a Frase guarda os dados da frase (JSON) na coluna link — não
+        // é vídeo.
+        const hasVideo = ex.gameKind !== 'monte-frase' && (ex.items || []).some(item => !!(item.videoLink || item.link));
         if (hasVideo) {
             const videoBadge = document.createElement('span');
             videoBadge.className = 'video-badge';
