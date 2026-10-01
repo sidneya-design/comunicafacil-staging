@@ -5957,20 +5957,34 @@ function setupModals() {
         }
     });
 
-    // Monte a Frase: cada "criar" é um conjunto novo com nome (como os decks
-    // de Reconhecimento) — pede o nome numa janela do app, cria a linha e
-    // abre direto no cadastro de frases.
+    // Monte a Frase: cada "criar" é um conjunto novo com nome e cor do card
+    // (como os decks de Reconhecimento) — pede os dois numa janela do app,
+    // cria a linha e abre direto no cadastro de frases. A mesma janela edita
+    // nome e cor depois (botão "Nome e cor" no topo do exercício).
     const newMonteFraseModal = document.getElementById('new-monte-frase-modal');
     const newMonteFraseName = document.getElementById('new-monte-frase-name');
     const newMonteFraseError = document.getElementById('new-monte-frase-error');
+    let editingMonteFraseDeck = null;
     const closeNewMonteFrase = () => { newMonteFraseModal.style.display = 'none'; };
-    document.getElementById('btn-create-monte-frase-exercise')?.addEventListener('click', () => {
-        if (!isAdmin && !isDoctor) return;
-        closeExerciseType();
-        newMonteFraseName.value = '';
+    const openMonteFraseDeckModal = (deck) => {
+        editingMonteFraseDeck = deck;
+        const [name, color] = (deck?.title || '').split('|');
+        document.getElementById('new-monte-frase-modal-title').textContent = deck ? 'Nome e cor do conjunto' : 'Novo conjunto do Monte a Frase';
+        document.getElementById('btn-submit-new-monte-frase').textContent = deck ? 'Salvar' : 'Criar conjunto';
+        document.getElementById('new-monte-frase-hint').style.display = deck ? 'none' : '';
+        newMonteFraseName.value = deck ? name : '';
+        setCardColorPickerValue('monte-frase-color-picker', 'monte-frase-color', 'monte-frase-color-custom', (deck && color) || 'blue');
         newMonteFraseError.style.display = 'none';
         newMonteFraseModal.style.display = 'flex';
         setTimeout(() => newMonteFraseName.focus(), 50);
+    };
+    document.getElementById('btn-create-monte-frase-exercise')?.addEventListener('click', () => {
+        if (!isAdmin && !isDoctor) return;
+        closeExerciseType();
+        openMonteFraseDeckModal(null);
+    });
+    document.getElementById('btn-edit-monte-frase-deck')?.addEventListener('click', () => {
+        if (canEditMonteFraseDeck(activeMonteFraseDeck)) openMonteFraseDeckModal(activeMonteFraseDeck);
     });
     document.getElementById('btn-close-new-monte-frase')?.addEventListener('click', closeNewMonteFrase);
     document.getElementById('btn-cancel-new-monte-frase')?.addEventListener('click', closeNewMonteFrase);
@@ -5978,10 +5992,21 @@ function setupModals() {
         e.preventDefault();
         const deckTitle = newMonteFraseName.value.trim();
         if (!deckTitle) return;
+        const title = `${deckTitle}|${document.getElementById('monte-frase-color').value || 'blue'}`;
         const submitBtn = document.getElementById('btn-submit-new-monte-frase');
         submitBtn.disabled = true;
         try {
-            const payload = { title: `${deckTitle}|blue`, visible: true, game_kind: 'monte-frase' };
+            if (editingMonteFraseDeck) {
+                const { error } = await supabaseClient.from('exercises').update({ title }).eq('id', editingMonteFraseDeck.id);
+                if (error) throw error;
+                logAdminAction('update', 'exercise', deckTitle);
+                editingMonteFraseDeck.title = title;
+                document.getElementById('monte-frase-deck-title').textContent = deckTitle;
+                closeNewMonteFrase();
+                loadExerciseCards();
+                return;
+            }
+            const payload = { title, visible: true, game_kind: 'monte-frase' };
             if (isDoctor) { payload.doctor_user_id = currentUserId; payload.company_id = currentUserCompanyId; }
             const { data: created, error } = await supabaseClient.from('exercises').insert([payload]).select().single();
             if (error) throw error;
@@ -5991,7 +6016,7 @@ function setupModals() {
             openMonteFraseDeck(lastMergedExercises.find(ex => ex.id === created.id)
                 || { id: created.id, title: created.title, doctorUserId: created.doctor_user_id, companyId: created.company_id }, { manage: true });
         } catch (err) {
-            newMonteFraseError.textContent = 'Não consegui criar o conjunto: ' + err.message;
+            newMonteFraseError.textContent = (editingMonteFraseDeck ? 'Não consegui salvar: ' : 'Não consegui criar o conjunto: ') + err.message;
             newMonteFraseError.style.display = 'block';
         } finally {
             submitBtn.disabled = false;
@@ -7111,6 +7136,7 @@ function openGame(gameId) {
         document.getElementById('game-monte-frase-container').style.display = 'flex';
         document.getElementById('monte-frase-deck-title').textContent = deck ? (deck.title || '').split('|')[0] : 'Monte a Frase';
         document.getElementById('btn-manage-monte-frase').style.display = canEditMonteFraseDeck(deck) ? 'flex' : 'none';
+        document.getElementById('btn-edit-monte-frase-deck').style.display = canEditMonteFraseDeck(deck) && deck ? 'flex' : 'none';
         // ?sb=staging acompanha o app, como em buildCompleteSentenceFrameUrl.
         const stagingParam = (typeof useStagingSupabase !== 'undefined' && useStagingSupabase) ? '&sb=staging' : '';
         const deckParam = deck ? `&deck=${encodeURIComponent(deck.id)}` : '';

@@ -420,6 +420,9 @@
                                     </div>
                                 </div>
                                 <div style="display: flex; gap: 8px; align-items: center; margin-left: auto;">
+                                    <button type="button" class="edit-mode-btn" id="btn-edit-monte-frase-deck" style="display:none;">
+                                        <i class="fas fa-palette" aria-hidden="true"></i> Nome e cor
+                                    </button>
                                     <button type="button" class="edit-mode-btn" id="btn-manage-monte-frase" style="display:none;">
                                         <i class="fas fa-sliders" aria-hidden="true"></i> Gerenciar frases
                                     </button>
@@ -2257,7 +2260,14 @@
                     <label for="new-monte-frase-name">Nome do conjunto</label>
                     <input type="text" id="new-monte-frase-name" required maxlength="60" placeholder="Ex: Na cozinha, Dia a dia" autocomplete="off">
                 </div>
-                <p class="media-hint">Depois de criar, você já cadastra as frases deste conjunto.</p>
+                <div class="form-group">
+                    <label for="monte-frase-color-custom">Cor do Card</label>
+                    <div class="card-color-picker" id="monte-frase-color-picker">
+                        <span class="card-color-custom-wrap"><input type="color" id="monte-frase-color-custom" class="card-color-custom" title="Outra cor" value="#FFFFFF"></span><button type="button" class="card-color-save-btn" id="monte-frase-color-save" title="Salvar esta cor para usar em outros cards" aria-label="Salvar cor customizada"><i class="fas fa-bookmark" aria-hidden="true"></i></button>
+                    </div>
+                    <input type="hidden" id="monte-frase-color" value="blue">
+                </div>
+                <p class="media-hint" id="new-monte-frase-hint">Depois de criar, você já cadastra as frases deste conjunto.</p>
                 <div id="new-monte-frase-error" class="admin-feedback error" style="display:none;"></div>
                 <div class="modal-footer">
                     <button type="button" class="btn-secondary" id="btn-cancel-new-monte-frase">Cancelar</button>
@@ -2417,7 +2427,7 @@
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=104"></script>
+    <script defer src="app.js?v=105"></script>
 </body>
 
 
