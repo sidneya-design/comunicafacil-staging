@@ -32,9 +32,6 @@ body.embedded-mode .speech-button { min-height: 46px; }
 .access-message { margin: 0; color: var(--muted); font-size: 1.15rem; font-weight: 650; text-align: center; }
 .access-message i { margin-right: 8px; color: var(--purple); }
 
-.only-custom { display: flex; align-items: center; gap: 9px; margin: -6px 0 14px; padding: 11px; background: #f8f6fd; border: 1px solid var(--line); border-radius: 12px; font-size: .88rem; font-weight: 700; cursor: pointer; }
-.only-custom input { width: 20px; height: 20px; accent-color: var(--purple); }
-.only-custom:has(input:disabled) { opacity: .5; cursor: not-allowed; }
 
 /* ── Modo quadro (?modo=quadro) ──────────────────────────────────────────
    Formato do "Desembaralhe" do Wordwall: palavras grandes numa lousa,

@@ -1,8 +1,9 @@
 // "Monte a Frase": o paciente ordena as palavras embaralhadas e, em seguida,
-// fala a frase (ouve o modelo, grava, compara). As frases prontas ficam neste
-// arquivo; as cadastradas por médico/admin, no Supabase (ver "Acesso e frases
-// cadastradas"). O resumo de erros/pistas/fala só existe enquanto a aba
-// estiver aberta.
+// fala a frase (ouve o modelo, grava, compara). Cada conjunto ("Na cozinha",
+// "Dia a dia"...) é um card próprio na grade de Exercícios; o app abre esta
+// página com ?deck=<id do conjunto> e ela mostra só as frases dele (ver
+// "Acesso e frases do conjunto"). O resumo de erros/pistas/fala só existe
+// enquanto a aba estiver aberta.
 //
 // `alt` lista outras ordens que também estão certas ("Hoje vou dormir cedo" /
 // "Vou dormir cedo hoje") — exigir só a ordem cadastrada puniria uma resposta
@@ -16,7 +17,10 @@ const pageParams = new URLSearchParams(window.location.search);
 // cabeçalho próprio some e quem conta acessos e tempo de uso é o app, do
 // mesmo jeito que faz com o Complete a Frase.
 const embeddedMode = pageParams.get("embedded") === "1";
+const deckId = pageParams.get("deck");
 
+// Frases da demonstração local (localhost sem login). Com login, as frases
+// vêm sempre do conjunto.
 const boardSentences = [
     { text: "O bolo de milho está gostoso.", icon: "🌽" },
     { text: "O café está forte e quente.", icon: "☕", alt: ["O café está quente e forte."] },
@@ -30,93 +34,53 @@ const boardSentences = [
     { text: "Vou escovar os dentes.", icon: "🪥" }
 ];
 
-// ── Acesso e frases cadastradas ───────────────────────────────────────────
-// Quem pode o quê (mesma cadeia dos outros conteúdos do app):
-//  - admin: sempre entra; publica a atividade pelo botão de visibilidade do
-//    card (game_flags) e cadastra frases no container global;
-//  - médico: só entra depois que o admin publicou; cadastra no banco da
-//    CLÍNICA (seed_key ":company:<uuid>"), que todos os médicos da mesma
-//    empresa veem e editam — médico novo ou substituto encontra tudo o que os
-//    colegas já cadastraram. Médico sem empresa usa um banco só dele
-//    (":doctor:<uuid>"). Libera por paciente em "Meus Pacientes"
-//    (patient_exercise_flags);
-//  - paciente (e qualquer outro papel): só entra se o admin publicou E a RLS
-//    devolver um container liberado pra ele; nunca cadastra.
-// As frases ficam em exercise_items do container (role "monte-frase-card",
-// dados em JSON na coluna link), como o Complete a Frase faz. Sem sessão em
-// localhost vale a demonstração local: cadastro liberado, salvo só no
-// navegador. No modo padrão o nível é decidido pelo número de palavras; no
-// quadro entram todas na mesma lista, depois das prontas.
+// ── Acesso e frases do conjunto ───────────────────────────────────────────
+// Cada conjunto é uma linha de `exercises` com game_kind "monte-frase"; as
+// frases ficam em exercise_items dele (role "monte-frase-card", dados em
+// JSON na coluna link). Quem pode o quê (mesma cadeia dos outros exercícios):
+//  - admin: cria conjuntos globais, publica pelo botão do card e edita
+//    qualquer conjunto;
+//  - médico: cria conjuntos da CLÍNICA (company_id), que todos os médicos da
+//    mesma empresa veem e editam; libera cada conjunto por paciente em "Meus
+//    Pacientes" (patient_exercise_flags). Os do admin aparecem como
+//    referência e podem ser liberados, mas não editados;
+//  - paciente: a RLS só devolve o conjunto se o médico liberou; nunca cadastra.
+// Sem sessão em localhost vale a demonstração local: frases prontas e
+// cadastro salvo só no navegador.
 const CUSTOM_KEY = "comunicafacil_monte_frase_custom_v1";
 const GAME_ID = "monte-frase";
-const SEED_KEY = "monte-frase-container"; // = MONTE_FRASE_SEED_KEY em app.js
-const CONTAINER_TITLE = "Monte a Frase|blue"; // = MONTE_FRASE_TITLE em app.js
 const CARD_ROLE = "monte-frase-card";
-const CONFIG_ROLE = "monte-frase-config";
 const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
-const access = { remote: false, role: null, userId: null, companyId: null, patientId: null, canManage: false, blocked: null, containerId: null, configItemId: null };
+const access = { remote: false, role: null, userId: null, patientId: null, canManage: false, blocked: null, deck: null };
 let supabase = null;
-let custom = { onlyCustom: false, sentences: [] };
-// Frases de base, que entram antes das da clínica: as 10 prontas deste
-// arquivo ou, se o admin cadastrou frases no banco global, as dele (só elas,
-// se o admin marcou "usar só as minhas frases"). É assim que o conteúdo do
-// admin chega aos médicos e aos pacientes deles.
-let baseSentences = boardSentences;
-let baseFromAdmin = false;
+let sentences = [];
 
-function applyAdminBase(parsed) {
-    if (!parsed?.sentences.length) return;
-    baseSentences = parsed.onlyCustom ? parsed.sentences : [...boardSentences, ...parsed.sentences];
-    baseFromAdmin = true;
-}
-
-function loadLocalCustom() {
+function loadLocalSentences() {
     try {
         const saved = JSON.parse(localStorage.getItem(CUSTOM_KEY) || "{}");
-        return {
-            onlyCustom: Boolean(saved.onlyCustom),
-            sentences: Array.isArray(saved.sentences) ? saved.sentences.filter(item => item && typeof item.text === "string") : []
-        };
+        return Array.isArray(saved.sentences) ? saved.sentences.filter(item => item && typeof item.text === "string") : [];
     } catch (error) {
-        return { onlyCustom: false, sentences: [] };
+        return [];
     }
 }
 
-function doctorScopedSeedKey(doctorUserId) { return `${SEED_KEY}:doctor:${doctorUserId}`; }
-function companyScopedSeedKey(companyId) { return `${SEED_KEY}:company:${companyId}`; }
-
-// Banco em que o médico cadastra: o da clínica, se ele tem empresa.
-function ownSeedKey() {
-    if (access.role !== "doctor") return SEED_KEY;
-    return access.companyId ? companyScopedSeedKey(access.companyId) : doctorScopedSeedKey(access.userId);
-}
-
 function parseRemoteItems(items) {
-    const parsed = { onlyCustom: false, configItemId: null, sentences: [] };
+    const parsed = [];
     (items || []).forEach(item => {
+        if (item.role !== CARD_ROLE) return;
         let payload;
         try { payload = JSON.parse(item.link || "{}"); } catch (error) { return; }
-        if (item.role === CONFIG_ROLE) {
-            parsed.onlyCustom = Boolean(payload.onlyCustom);
-            parsed.configItemId = item.id;
-        } else if (item.role === CARD_ROLE && typeof payload.text === "string") {
-            const entry = { id: `remote-${item.id}`, remoteItemId: item.id, text: payload.text };
-            if (Array.isArray(payload.alt) && payload.alt.length) entry.alt = payload.alt;
-            if (payload.icon) entry.icon = payload.icon;
-            parsed.sentences.push(entry);
-        }
+        if (typeof payload.text !== "string") return;
+        const entry = { id: `remote-${item.id}`, remoteItemId: item.id, text: payload.text };
+        if (Array.isArray(payload.alt) && payload.alt.length) entry.alt = payload.alt;
+        if (payload.icon) entry.icon = payload.icon;
+        parsed.push(entry);
     });
     return parsed;
 }
 
-async function fetchContainerItems(containerId) {
-    const { data, error } = await supabase.from("exercise_items").select("id, role, link").eq("exercise_id", containerId);
-    if (error) throw error;
-    return parseRemoteItems(data);
-}
-
-// Decide se a pessoa entra e carrega as frases do container certo.
+// Decide se a pessoa entra e carrega as frases do conjunto pedido.
 async function initAccess() {
     let session = null;
     try {
@@ -129,7 +93,7 @@ async function initAccess() {
     if (!session) {
         if (isLocalhost) {
             access.canManage = true;
-            custom = loadLocalCustom();
+            sentences = loadLocalSentences();
             return;
         }
         if (!embeddedMode) window.location.href = "index.html";
@@ -139,99 +103,43 @@ async function initAccess() {
 
     access.remote = true;
     access.userId = session.user.id;
+    if (!deckId) {
+        access.blocked = "Abra um conjunto do Monte a Frase pela tela de Exercícios.";
+        return;
+    }
     try {
         const { data: roleRow } = await supabase.from("user_roles").select("role").eq("user_id", access.userId).maybeSingle();
         access.role = roleRow?.role || null;
 
-        if (access.role !== "admin") {
-            const { data: flag } = await supabase.from("game_flags").select("visible").eq("game_id", GAME_ID).maybeSingle();
-            if (flag?.visible !== true) {
-                access.blocked = "Este exercício ainda não foi liberado pelo administrador.";
-                return;
-            }
-        }
-
-        if (access.role === "admin" || access.role === "doctor") {
-            // Autoria: o banco global (admin) ou o da clínica do médico.
-            access.canManage = true;
-            if (access.role === "doctor") {
-                const { data: member } = await supabase.from("company_members").select("company_id").eq("user_id", access.userId).maybeSingle();
-                access.companyId = member?.company_id || null;
-            }
-            const { data: own } = await supabase.from("exercises").select("id").eq("seed_key", ownSeedKey()).maybeSingle();
-            if (own) {
-                access.containerId = own.id;
-                const parsed = await fetchContainerItems(own.id);
-                custom = { onlyCustom: parsed.onlyCustom, sentences: parsed.sentences };
-                access.configItemId = parsed.configItemId;
-            }
-            if (access.role === "doctor") {
-                // O médico lê o banco global do admin (a RLS libera conteúdo
-                // global pra médico) e usa como base, no lugar das prontas.
-                const { data: adminBank } = await supabase.from("exercises").select("id").eq("seed_key", SEED_KEY).maybeSingle();
-                if (adminBank) applyAdminBase(await fetchContainerItems(adminBank.id));
-            }
-            return;
-        }
-
-        // Paciente: a RLS só devolve containers que o médico liberou pra ele
-        // (ao liberar o Monte a Frase, o app libera junto o banco do admin).
-        // Frases da clínica (ou do banco só do médico, se ele não tem empresa)
-        // entram sobre a base: as do admin, se liberadas, senão as prontas.
-        const { data: patientRow } = await supabase.from("patients").select("id, doctor_user_id, company_id").eq("user_id", access.userId).maybeSingle();
-        access.patientId = patientRow?.id || null;
-        const keys = [];
-        if (patientRow?.company_id) keys.push(companyScopedSeedKey(patientRow.company_id));
-        if (patientRow?.doctor_user_id) keys.push(doctorScopedSeedKey(patientRow.doctor_user_id));
-        keys.push(SEED_KEY);
-        const { data: containers } = await supabase.from("exercises").select("id, seed_key").in("seed_key", keys);
-        if (!containers?.length) {
+        // A RLS só devolve o conjunto pra quem pode vê-lo (paciente: só se o
+        // médico liberou).
+        const { data: deck } = await supabase.from("exercises")
+            .select("id, title, doctor_user_id, company_id").eq("id", deckId).eq("game_kind", GAME_ID).maybeSingle();
+        if (!deck) {
             access.blocked = "Este exercício ainda não foi liberado para você. Fale com o seu médico.";
             return;
         }
-        const adminBank = containers.find(row => row.seed_key === SEED_KEY);
-        if (adminBank) applyAdminBase(await fetchContainerItems(adminBank.id));
-        for (const key of keys.filter(key => key !== SEED_KEY)) {
-            const container = containers.find(row => row.seed_key === key);
-            if (!container) continue;
-            const parsed = await fetchContainerItems(container.id);
-            if (parsed.sentences.length) {
-                custom = { onlyCustom: parsed.onlyCustom, sentences: parsed.sentences };
-                break;
-            }
+        access.deck = deck;
+
+        if (access.role === "admin") {
+            access.canManage = true;
+        } else if (access.role === "doctor" && deck.doctor_user_id) {
+            const { data: member } = await supabase.from("company_members").select("company_id").eq("user_id", access.userId).maybeSingle();
+            access.canManage = deck.doctor_user_id === access.userId
+                || Boolean(deck.company_id && deck.company_id === member?.company_id);
+        } else if (access.role === "patient") {
+            const { data: patientRow } = await supabase.from("patients").select("id").eq("user_id", access.userId).maybeSingle();
+            access.patientId = patientRow?.id || null;
         }
+
+        const { data: items, error } = await supabase.from("exercise_items").select("id, role, link").eq("exercise_id", deck.id);
+        if (error) throw error;
+        sentences = parseRemoteItems(items);
     } catch (error) {
         console.warn("Monte a Frase: erro ao verificar o acesso:", error);
         access.canManage = false;
         access.blocked = "Não consegui verificar o acesso a este exercício. Tente de novo em instantes.";
     }
-}
-
-// Container de quem está cadastrando — criado na primeira frase (mesmo padrão
-// de getOrCreateOwnCompleteFraseContainer em complete-frase.js). O da clínica
-// leva company_id: é isso que deixa os colegas lerem e editarem (RLS "banco
-// da empresa"), igual aos outros exercícios do médico.
-async function getOrCreateOwnContainer() {
-    if (access.containerId) return access.containerId;
-    const seedKey = ownSeedKey();
-    const findExisting = async () => (await supabase.from("exercises").select("id").eq("seed_key", seedKey).maybeSingle()).data;
-    let existing = await findExisting();
-    if (!existing) {
-        const payload = { title: CONTAINER_TITLE, visible: false, seed_key: seedKey };
-        if (access.role === "doctor") payload.doctor_user_id = access.userId;
-        if (access.role === "doctor" && access.companyId) payload.company_id = access.companyId;
-        const { data: created, error } = await supabase.from("exercises").insert([payload]).select().single();
-        if (error) {
-            // Um colega da clínica pode ter criado o mesmo banco ao mesmo tempo
-            // (seed_key é única): nesse caso, usa o dele.
-            existing = await findExisting();
-            if (!existing) throw error;
-        } else {
-            existing = created;
-        }
-    }
-    access.containerId = existing.id;
-    return existing.id;
 }
 
 function sentencePayload(entry) {
@@ -241,25 +149,24 @@ function sentencePayload(entry) {
     return payload;
 }
 
-function saveLocalCustom() {
-    localStorage.setItem(CUSTOM_KEY, JSON.stringify(custom));
+function saveLocalSentences() {
+    localStorage.setItem(CUSTOM_KEY, JSON.stringify({ sentences }));
 }
 
 async function persistNewSentence(entry) {
     if (!access.remote) {
-        custom.sentences.push(entry);
-        saveLocalCustom();
+        sentences.push(entry);
+        saveLocalSentences();
         return;
     }
-    const exerciseId = await getOrCreateOwnContainer();
     const { data: inserted, error } = await supabase.from("exercise_items").insert([{
-        exercise_id: exerciseId, word: entry.text, role: CARD_ROLE, link: JSON.stringify(sentencePayload(entry))
+        exercise_id: access.deck.id, word: entry.text, role: CARD_ROLE, link: JSON.stringify(sentencePayload(entry))
     }]).select().single();
     if (error) throw error;
-    custom.sentences.push({ ...entry, id: `remote-${inserted.id}`, remoteItemId: inserted.id });
+    sentences.push({ ...entry, id: `remote-${inserted.id}`, remoteItemId: inserted.id });
 }
 
-// Edição mantém a mesma linha (mesmo id): liberações e ordem das frases não mudam.
+// Edição mantém a mesma linha (mesmo id): a ordem das frases não muda.
 async function persistUpdatedSentence(entry, changes) {
     const updated = { ...entry, ...changes };
     if (!updated.alt?.length) delete updated.alt;
@@ -270,8 +177,8 @@ async function persistUpdatedSentence(entry, changes) {
             .eq("id", entry.remoteItemId);
         if (error) throw error;
     }
-    custom.sentences = custom.sentences.map(other => (other.id === entry.id ? updated : other));
-    if (!access.remote) saveLocalCustom();
+    sentences = sentences.map(other => (other.id === entry.id ? updated : other));
+    if (!access.remote) saveLocalSentences();
 }
 
 async function persistRemovedSentence(entry) {
@@ -279,34 +186,12 @@ async function persistRemovedSentence(entry) {
         const { error } = await supabase.from("exercise_items").delete().eq("id", entry.remoteItemId);
         if (error) throw error;
     }
-    custom.sentences = custom.sentences.filter(other => other.id !== entry.id);
-    if (!access.remote) saveLocalCustom();
-}
-
-async function persistOnlyCustom(value) {
-    if (!access.remote) {
-        custom.onlyCustom = value;
-        saveLocalCustom();
-        return;
-    }
-    const link = JSON.stringify({ onlyCustom: value });
-    if (access.configItemId) {
-        const { error } = await supabase.from("exercise_items").update({ link }).eq("id", access.configItemId);
-        if (error) throw error;
-    } else {
-        const exerciseId = await getOrCreateOwnContainer();
-        const { data: inserted, error } = await supabase.from("exercise_items").insert([{
-            exercise_id: exerciseId, word: "", role: CONFIG_ROLE, link
-        }]).select().single();
-        if (error) throw error;
-        access.configItemId = inserted.id;
-    }
-    custom.onlyCustom = value;
+    sentences = sentences.filter(other => other.id !== entry.id);
+    if (!access.remote) saveLocalSentences();
 }
 
 function buildLevels() {
-    const useDefaults = !(custom.onlyCustom && custom.sentences.length);
-    return { 1: [...(useDefaults ? baseSentences : []), ...custom.sentences] };
+    return { 1: access.remote ? [...sentences] : [...boardSentences, ...sentences] };
 }
 
 let levels = buildLevels();
@@ -634,7 +519,7 @@ function logResult(item) {
     if (!supabase || !access.remote || access.role !== "patient" || !access.patientId) return;
     const seconds = Math.max(0, Math.round((Date.now() - (state.roundStartedAt || Date.now())) / 1000));
     supabase.from("activity_results").insert([{
-        patient_id: access.patientId, activity: GAME_ID, session_id: state.sessionId,
+        patient_id: access.patientId, activity: GAME_ID, exercise_id: access.deck.id, session_id: state.sessionId,
         item_text: item.text, moves: state.errors, hints: state.hintLevel, seconds
     }]).then(({ error }) => {
         if (error) console.warn("Monte a Frase: não consegui registrar o resultado:", error);
@@ -814,9 +699,28 @@ function shuffleSentences() {
 
 // Recomeça do início, com as frases numa ordem nova (entrada, "Recomeçar",
 // mudança no cadastro e cada vez que o app abre a atividade).
+function showAccessMessage(icon, text) {
+    const message = document.getElementById("access-message");
+    message.innerHTML = `<i class="fas ${icon}" aria-hidden="true"></i><span></span>`;
+    message.querySelector("span").textContent = text;
+    document.getElementById("access-card").hidden = false;
+}
+
 function startLevel() {
     stopAudio();
     closeSpeechPanel();
+    // Conjunto recém-criado (ou com todas as frases apagadas): não há o que
+    // montar ainda.
+    if (!levels[1].length) {
+        clearInterval(timerInterval);
+        exerciseCard.hidden = true;
+        summaryCard.hidden = true;
+        showAccessMessage("fa-inbox", access.canManage
+            ? "Este conjunto ainda não tem frases. Cadastre a primeira em “Gerenciar frases”."
+            : "Este conjunto ainda não tem frases. Fale com o seu médico.");
+        return;
+    }
+    document.getElementById("access-card").hidden = true;
     Object.assign(state, { level: 1, round: 0, stats: [] });
     state.sessionId = window.crypto?.randomUUID?.() || `sessao-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     shuffleSentences();
@@ -867,7 +771,6 @@ const sentenceText = document.getElementById("sentence-text");
 const sentenceAlt = document.getElementById("sentence-alt");
 const sentenceIcon = document.getElementById("sentence-icon");
 const formError = document.getElementById("form-error");
-const onlyCustom = document.getElementById("only-custom");
 
 function cleanSentence(value) {
     const text = value.trim().replace(/\s+/g, " ");
@@ -896,24 +799,19 @@ function showToast(message) {
 
 function renderSentenceLibrary() {
     const list = document.getElementById("sentence-list");
-    document.getElementById("sentence-count").textContent = custom.sentences.length;
-    onlyCustom.checked = custom.onlyCustom && custom.sentences.length > 0;
-    onlyCustom.disabled = custom.sentences.length === 0;
-    document.getElementById("library-help").textContent = custom.onlyCustom && custom.sentences.length
-        ? "As frases prontas estão desligadas."
-        : "Entram junto com as frases prontas.";
+    document.getElementById("sentence-count").textContent = sentences.length;
     list.innerHTML = "";
-    if (!custom.sentences.length) {
+    if (!sentences.length) {
         const empty = document.createElement("div");
         empty.className = "question-empty";
         empty.innerHTML = `<i class="fas fa-inbox" aria-hidden="true"></i><strong>Nenhuma frase cadastrada</strong><span></span>`;
-        empty.querySelector("span").textContent = baseFromAdmin
-            ? `As ${baseSentences.length} frases do admin já estão disponíveis.`
-            : "As frases prontas já estão disponíveis.";
+        empty.querySelector("span").textContent = access.remote
+            ? "Cadastre a primeira frase deste conjunto ao lado."
+            : "As frases prontas da demonstração já estão disponíveis.";
         list.appendChild(empty);
         return;
     }
-    [...custom.sentences].reverse().forEach(entry => {
+    [...sentences].reverse().forEach(entry => {
         const item = document.createElement("article");
         item.className = "question-item";
         const top = document.createElement("div");
@@ -1009,7 +907,7 @@ document.getElementById("cancel-edit").addEventListener("click", stopEditing);
 sentenceForm.addEventListener("submit", async event => {
     event.preventDefault();
     if (!access.canManage) return;
-    const editingEntry = editingId ? custom.sentences.find(other => other.id === editingId) : null;
+    const editingEntry = editingId ? sentences.find(other => other.id === editingId) : null;
     const text = cleanSentence(sentenceText.value);
     const alt = sentenceAlt.value.split(/\n+/).map(cleanSentence).filter(Boolean);
     if (sentenceWords(text).length < 3) {
@@ -1047,19 +945,6 @@ sentenceForm.addEventListener("submit", async event => {
     sentenceText.focus();
 });
 
-onlyCustom.addEventListener("change", async () => {
-    const wanted = onlyCustom.checked;
-    onlyCustom.disabled = true;
-    try {
-        await persistOnlyCustom(wanted);
-        applyCustomChange(wanted ? "Usando só as suas frases." : "Frases prontas de volta.");
-    } catch (error) {
-        console.warn("Monte a Frase: erro ao salvar a opção:", error);
-        renderSentenceLibrary(); // volta a caixa pro valor que está salvo
-        showToast("Não consegui salvar essa opção. Tente de novo.");
-    }
-});
-
 function closeManager() {
     if (editingId) stopEditing(); // fechar no meio da edição descarta as mudanças não salvas
     managerOverlay.classList.remove("open");
@@ -1090,13 +975,6 @@ window.addEventListener("message", event => {
     if (event.data.type === "monte-frase:pause-audio") {
         stopAudio();
     }
-    // O app manda isto a cada vez que o paciente abre a atividade: o iframe
-    // continua carregado entre uma abertura e outra, então sem isso a
-    // sequência (e o progresso) seriam os da vez anterior.
-    if (event.data.type === "monte-frase:restart" && accessReady && !access.blocked) {
-        closeManager();
-        startLevel();
-    }
 });
 managerOverlay.addEventListener("click", event => { if (event.target === managerOverlay) closeManager(); });
 document.addEventListener("keydown", event => { if (event.key === "Escape" && managerOverlay.classList.contains("open")) closeManager(); });
@@ -1105,7 +983,9 @@ document.body.classList.add("board-mode"); // os estilos da lousa dependem desta
 if (embeddedMode) document.body.classList.add("embedded-mode");
 
 let accessReady = false;
-let openManagerWhenReady = false;
+// ?manage=1: o app abriu o conjunto pelo lápis do card ou logo depois de
+// criá-lo — entra direto no cadastro.
+let openManagerWhenReady = pageParams.get("manage") === "1";
 
 // Nada do exercício aparece antes de sabermos se a pessoa pode entrar
 // (exercise-card começa com hidden no HTML).
@@ -1113,24 +993,18 @@ let openManagerWhenReady = false;
 initAccess().then(() => {
     accessReady = true;
     if (access.blocked) {
-        const message = document.getElementById("access-message");
-        message.innerHTML = `<i class="fas fa-lock" aria-hidden="true"></i><span></span>`;
-        message.querySelector("span").textContent = access.blocked;
+        showAccessMessage("fa-lock", access.blocked);
         return;
     }
-    document.getElementById("access-card").hidden = true;
     document.getElementById("open-manager").hidden = !access.canManage;
+    const deckName = (access.deck?.title || "").split("|")[0];
     document.getElementById("manager-scope").textContent = !access.remote
         ? "Demonstração local: as frases ficam salvas só neste navegador."
-        : access.role === "admin"
-            ? "Frases do banco global do admin. O médico decide para quais pacientes liberar."
-            : access.companyId
-                ? "Frases da clínica: todos os médicos da clínica veem e editam. Valem para os pacientes a quem cada um liberar este exercício."
-                : "Frases do seu banco. Valem para os pacientes a quem você liberar este exercício.";
-    if (access.companyId) {
-        document.getElementById("library-title").textContent = "Frases da clínica";
-        document.querySelector("#only-custom + span").textContent = "Usar só as frases da clínica";
-    }
+        : !access.deck.doctor_user_id
+            ? `Conjunto “${deckName}” do admin: aparece para todos os médicos, que liberam para os pacientes em “Meus Pacientes”.`
+            : access.deck.company_id
+                ? `Conjunto “${deckName}” da clínica: todos os médicos da clínica veem e editam. Cada médico libera para os pacientes em “Meus Pacientes”.`
+                : `Conjunto “${deckName}” do seu banco. Libere para os pacientes em “Meus Pacientes”.`;
     levels = buildLevels();
     renderSentenceLibrary();
     startLevel();

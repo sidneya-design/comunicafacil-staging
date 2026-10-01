@@ -4736,6 +4736,7 @@ button, .action-btn { touch-action: manipulation; }
 }
 
 /* Evolução do paciente (Monte a Frase) */
+.evolution-deck-filter { align-self: flex-start; margin-bottom: 1rem; padding: 8px 12px; border: 1px solid #d5d9de; border-radius: 8px; background: #fff; font: inherit; color: #1f2933; cursor: pointer; }
 .evolution-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 1rem; }
 .evolution-summary div { background: #f4f6f8; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
 .evolution-summary strong { font-size: 1.35rem; color: #1f2933; }

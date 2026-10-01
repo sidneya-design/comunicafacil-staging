@@ -3808,11 +3808,13 @@ function renderExerciseCards(exercisesArray) {
         else if (ex.gameKind === 'syllables') openEditSyllablesExercise(ex);
         else if (ex.gameKind === 'audio-real') openEditAudioExercise(ex);
         else if (ex.gameKind === 'reading-text') openEditReadingTextExercise(ex);
+        else if (ex.gameKind === 'monte-frase') openMonteFraseDeck(ex, { manage: true });
         else openEditExercise(ex);
     };
     const openExerciseCard = (ex) => {
         if (ex.gameKind === 'naming') playNamingDeck(ex);
         else if (ex.gameKind === 'afasia') playAfasiaDeck(ex);
+        else if (ex.gameKind === 'monte-frase') openMonteFraseDeck(ex);
         else if (ex.gameKind === 'reading-text') openReadingTextPlayer(ex);
         else openPresentationPlaylist(ex);
     };
@@ -4025,7 +4027,7 @@ function renderExerciseCards(exercisesArray) {
                 btn.appendChild(createNotifyUsersButton(displayTitle, 'Exercício', { id: ex.patientId, name: patientInfo?.name, email: patientInfo?.email }));
             }
         } else if (isDoctor && ex.doctorUserId && ex.doctorUserId !== currentUserId && !ex.patientId && ex.companyId && ex.companyId === currentUserCompanyId
-                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text')) {
+                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text' || ex.gameKind === 'monte-frase')) {
             // Exercício do banco de um colega da mesma empresa (não do admin, não
             // meu): a RLS já libera escrita compartilhada por empresa faz tempo
             // (migration company_shared_doctor_bank), mas a tela nunca tinha
@@ -5850,15 +5852,6 @@ function setupModals() {
         // banco — admin já é dono do conteúdo global, não precisa "adicionar".
         const readyBankTile = document.getElementById('btn-open-ready-bank');
         if (readyBankTile) readyBankTile.style.display = isDoctor ? 'flex' : 'none';
-        // Monte a Frase: o admin sempre vê; o médico só depois que o admin
-        // publicou a atividade (mesma regra do card na grade).
-        const monteFraseTile = document.getElementById('btn-create-monte-frase-exercise');
-        if (monteFraseTile) {
-            monteFraseTile.style.display = isAdmin ? 'flex' : 'none';
-            if (!isAdmin) getGameVisibility('monte-frase').then(visible => {
-                monteFraseTile.style.display = visible ? 'flex' : 'none';
-            });
-        }
         document.getElementById('exercise-type-modal').style.display = 'flex';
     });
 
@@ -5964,17 +5957,25 @@ function setupModals() {
         }
     });
 
-    // Monte a Frase no "Qual exercício deseja criar?": abre a atividade e o
-    // cadastro de frases (o iframe guarda o pedido até terminar de conferir
-    // o acesso, então não depende de tempo fixo como o setTimeout acima).
-    document.getElementById('btn-create-monte-frase-exercise')?.addEventListener('click', () => {
+    // Monte a Frase: cada "criar" é um conjunto novo com nome (como os decks
+    // de Reconhecimento) — cria a linha e abre direto no cadastro de frases.
+    document.getElementById('btn-create-monte-frase-exercise')?.addEventListener('click', async () => {
+        if (!isAdmin && !isDoctor) return;
+        const deckTitle = prompt('Nome deste conjunto do Monte a Frase (ex: "Na cozinha", "Dia a dia"):');
+        if (!deckTitle || !deckTitle.trim()) return;
         closeExerciseType();
-        const frame = document.getElementById('monte-frase-frame');
-        const openManagerMessage = () => frame.contentWindow?.postMessage({ type: 'monte-frase:open-manager' }, window.location.origin);
-        const alreadyLoaded = Boolean(frame.src) && frame.contentDocument?.readyState === 'complete';
-        if (!alreadyLoaded) frame.addEventListener('load', openManagerMessage, { once: true });
-        if (document.getElementById('game-monte-frase-container').style.display !== 'flex') openGame('monte-frase');
-        if (alreadyLoaded) openManagerMessage();
+        try {
+            const payload = { title: `${deckTitle.trim()}|blue`, visible: true, game_kind: 'monte-frase' };
+            if (isDoctor) { payload.doctor_user_id = currentUserId; payload.company_id = currentUserCompanyId; }
+            const { data: created, error } = await supabaseClient.from('exercises').insert([payload]).select().single();
+            if (error) throw error;
+            logAdminAction('create', 'exercise', deckTitle.trim());
+            await loadExerciseCards();
+            openMonteFraseDeck(lastMergedExercises.find(ex => ex.id === created.id)
+                || { id: created.id, title: created.title, doctorUserId: created.doctor_user_id, companyId: created.company_id }, { manage: true });
+        } catch (err) {
+            alert('Erro ao criar conjunto: ' + err.message);
+        }
     });
 
     const closeExerciseUpload = () => { document.getElementById('upload-exercise-modal').style.display = 'none'; document.getElementById('upload-exercise-form').reset(); };
@@ -6927,14 +6928,6 @@ async function renderActivityCards(container, activities, isCurrent = () => true
             if (baseSeedKey && !hasReleasedGameContent(baseSeedKey)) continue;
         }
 
-        // Monte a Frase: quem não é admin nem médico só vê o card se o médico
-        // liberou o container pra ele em "Meus Pacientes" — a RLS só devolve
-        // o container liberado, então basta ele existir na lista. Não exige
-        // frases cadastradas (diferente dos jogos acima): o exercício já vem
-        // com frases prontas.
-        if (game.id === 'monte-frase' && !isAdmin && !isDoctor
-            && !lastMergedExercises.some(ex => isGameContainerSeedKey(ex.seedKey, MONTE_FRASE_SEED_KEY))) continue;
-
         const btn = document.createElement('button');
         btn.className = `word-btn ${game.styleClass}` + (isAdmin && !isVisible ? ' card-hidden' : '');
 
@@ -6996,7 +6989,8 @@ async function renderExerciseActivities() {
     // por renderExerciseCards (na mesma grade). exerciseActivities continua
     // com as entradas intactas (openGame/resolveActivityTitle dependem
     // delas), só não desenha mais os atalhos fixos antigos.
-    let staticActivities = exerciseActivities.filter(a => a.id !== 'naming' && a.id !== 'afasia');
+    // Monte a Frase também: cada conjunto é um card (ex.gameKind 'monte-frase').
+    let staticActivities = exerciseActivities.filter(a => a.id !== 'naming' && a.id !== 'afasia' && a.id !== 'monte-frase');
 
     // Mesma busca por nome da grade de exercícios (renderExerciseCards) — sem
     // isso, cards estáticos como "Complete a Frase" ignoravam o filtro e
@@ -7089,14 +7083,19 @@ function openGame(gameId) {
         // Mesmo esquema do Complete a Frase: página própria num iframe. O
         // acesso e o tempo de uso são contados aqui fora, pelo
         // startUsageActivity logo abaixo, como em qualquer outro exercício.
+        // O iframe recarrega a cada abertura, já com o conjunto escolhido no
+        // card (openMonteFraseDeck): começa do zero, com as frases numa ordem
+        // nova.
         const frame = document.getElementById('monte-frase-frame');
+        const deck = activeMonteFraseDeck;
         document.getElementById('game-monte-frase-container').style.display = 'flex';
+        document.getElementById('monte-frase-deck-title').textContent = deck ? (deck.title || '').split('|')[0] : 'Monte a Frase';
+        document.getElementById('btn-manage-monte-frase').style.display = canEditMonteFraseDeck(deck) ? 'flex' : 'none';
         // ?sb=staging acompanha o app, como em buildCompleteSentenceFrameUrl.
         const stagingParam = (typeof useStagingSupabase !== 'undefined' && useStagingSupabase) ? '&sb=staging' : '';
-        if (!frame.src) frame.src = frame.dataset.src + stagingParam;
-        // Já carregado de uma abertura anterior: recomeça com as frases numa
-        // ordem nova, como numa entrada nova.
-        else frame.contentWindow?.postMessage({ type: 'monte-frase:restart' }, window.location.origin);
+        const deckParam = deck ? `&deck=${encodeURIComponent(deck.id)}` : '';
+        frame.src = frame.dataset.src + deckParam + (openMonteFraseManager ? '&manage=1' : '') + stagingParam;
+        openMonteFraseManager = false;
     } else if (gameId === 'speech-naming') {
         document.getElementById('game-speech-naming-container').style.display = 'flex';
         startSpeechNamingGame();
@@ -11753,33 +11752,29 @@ const COMPLETE_FRASE_SEED_KEY = 'complete-frase-container';
 // existir aqui também porque openPatientExercisesModal (fora do iframe)
 // cria esse container pelo mesmo padrão de getOrCreateGameContainer.
 const COMPLETE_FRASE_TITLE = 'Complete a Frase|orange';
-// Container do Monte a Frase — mesmo esquema do Complete a Frase: as frases
-// são gerenciadas de dentro do iframe (monte-frase.js, que repete estes dois
-// valores), e a linha em `exercises` é o que o médico libera por paciente.
+// Monte a Frase: vários conjuntos com nome ("Na cozinha", "Dia a dia"), cada
+// um uma linha de `exercises` com game_kind 'monte-frase' e um card próprio
+// na grade, liberado por paciente como os decks de Reconhecimento. O médico
+// cria para a clínica (company_id), o admin cria globais. As frases são
+// gerenciadas dentro do iframe (monte-frase.js?deck=<id>).
+// A seed_key é dos bancos únicos de antes dos conjuntos, que ficaram no
+// banco sem conversão; fica só pra eles nunca vazarem como card solto.
 const MONTE_FRASE_SEED_KEY = 'monte-frase-container';
-const MONTE_FRASE_TITLE = 'Monte a Frase|blue';
+let activeMonteFraseDeck = null;
+let openMonteFraseManager = false;
 
-// Banco do Monte a Frase do médico logado: o da clínica (todos os médicos da
-// empresa compartilham, então médico novo ou substituto vê tudo), ou um só
-// dele se não tiver empresa. Mesma regra de monte-frase.js (ownSeedKey).
-function monteFraseOwnSeedKey() {
-    return currentUserCompanyId
-        ? `${MONTE_FRASE_SEED_KEY}:company:${currentUserCompanyId}`
-        : doctorScopedSeedKey(MONTE_FRASE_SEED_KEY, currentUserId);
+// Mesma regra da RLS: admin edita tudo; médico, os conjuntos dele e os da
+// clínica dele. Os do admin, o médico só libera.
+function canEditMonteFraseDeck(ex) {
+    if (isAdmin) return true;
+    if (!isDoctor || !ex?.doctorUserId) return false;
+    return ex.doctorUserId === currentUserId || (!!ex.companyId && ex.companyId === currentUserCompanyId);
 }
 
-// getOrCreateGameContainer procura por (seed_key, doctor_user_id) — no banco
-// da clínica o dono pode ser outro médico, então aqui a busca é só pela
-// seed_key (única), e o insert leva company_id pros colegas enxergarem.
-async function getOrCreateMonteFraseContainer(seedKey) {
-    const findExisting = async () => (await supabaseClient.from('exercises').select('*').eq('seed_key', seedKey).maybeSingle()).data;
-    const existing = await findExisting();
-    if (existing) return existing;
-    const payload = { title: MONTE_FRASE_TITLE, visible: false, seed_key: seedKey, doctor_user_id: currentUserId };
-    if (seedKey.includes(':company:')) payload.company_id = currentUserCompanyId;
-    const { data: created, error } = await supabaseClient.from('exercises').insert([payload]).select().single();
-    if (!error) return created;
-    return findExisting(); // um colega pode ter criado ao mesmo tempo
+function openMonteFraseDeck(ex, { manage = false } = {}) {
+    activeMonteFraseDeck = ex;
+    openMonteFraseManager = manage && canEditMonteFraseDeck(ex);
+    openGame('monte-frase');
 }
 
 function makeNamingSetId() {
@@ -14193,37 +14188,20 @@ async function openPatientExercisesModal(patient) {
     // médico liberar. Reconhecimento de Palavras/Imagem saíram daqui (Fase
     // 24): agora são vários decks reais, criados explicitamente, já
     // aparecem em myExercises normalmente.
+    // Monte a Frase também não entra aqui: cada conjunto é uma linha real.
     const activityPlaceholders = [
         { baseSeedKey: COMPLETE_FRASE_SEED_KEY, title: COMPLETE_FRASE_TITLE },
     ];
-    // Monte a Frase só entra na lista de liberação depois que o admin
-    // publicou a atividade; antes disso o médico nem a enxerga.
-    const monteFrasePublished = isAdmin || await getGameVisibility('monte-frase');
-    if (monteFrasePublished) activityPlaceholders.push({ baseSeedKey: MONTE_FRASE_SEED_KEY, title: MONTE_FRASE_TITLE, ownSeedKey: monteFraseOwnSeedKey() });
     // Container já pode existir como global (admin cadastrou direto) OU como
     // banco do próprio médico — nos dois casos já tem uma linha de verdade
     // na lista, não precisa do placeholder virtual (evita duplicar a mesma
     // atividade duas vezes no modal).
     const existingSeedKeys = new Set((myExercises || []).map(ex => ex.seedKey || ex.seed_key));
-    // Monte a Frase (ownSeedKey) sempre aparece pelo banco da clínica: o banco
-    // do admin não é uma linha à parte, é liberado junto (ver o clique abaixo).
     const virtualEntries = activityPlaceholders
-        .filter(p => p.ownSeedKey
-            ? !existingSeedKeys.has(p.ownSeedKey)
-            : !existingSeedKeys.has(p.baseSeedKey) && !existingSeedKeys.has(doctorScopedSeedKey(p.baseSeedKey, currentUserId)))
-        .map(p => ({ id: null, title: p.title, doctor_user_id: currentUserId, baseSeedKey: p.baseSeedKey, ownSeedKey: p.ownSeedKey }));
+        .filter(p => !existingSeedKeys.has(p.baseSeedKey) && !existingSeedKeys.has(doctorScopedSeedKey(p.baseSeedKey, currentUserId)))
+        .map(p => ({ id: null, title: p.title, doctor_user_id: currentUserId, baseSeedKey: p.baseSeedKey }));
 
-    // Com banco da clínica, um banco antigo só do médico (de antes dele entrar
-    // numa empresa) não aparece mais pra liberar — duplicaria o Monte a Frase.
-    const legacyMonteFraseKey = currentUserCompanyId ? doctorScopedSeedKey(MONTE_FRASE_SEED_KEY, currentUserId) : null;
-    // Banco do admin do Monte a Frase: as frases dele são a base do exercício
-    // pra todos, então ele é liberado junto com o Monte a Frase da clínica em
-    // vez de aparecer como "Monte a Frase (do admin)" separado.
-    const adminMonteFraseContainer = (myExercises || []).find(ex => (ex.seedKey || ex.seed_key) === MONTE_FRASE_SEED_KEY) || null;
-    const allEntries = [...(myExercises || []), ...virtualEntries]
-        .filter(ex => monteFrasePublished || !isGameContainerSeedKey(ex.seedKey || ex.seed_key, MONTE_FRASE_SEED_KEY))
-        .filter(ex => !legacyMonteFraseKey || (ex.seedKey || ex.seed_key) !== legacyMonteFraseKey)
-        .filter(ex => ex !== adminMonteFraseContainer);
+    const allEntries = [...(myExercises || []), ...virtualEntries];
 
     list.innerHTML = '';
     if (!allEntries.length) {
@@ -14259,23 +14237,15 @@ async function openPatientExercisesModal(patient) {
                     // Primeira liberação desta atividade: cria o container
                     // vazio do médico agora (mesmo get-or-create que
                     // startNamingGame/startAfasiaGame/complete-frase usam).
-                    const container = ex.ownSeedKey
-                        ? await getOrCreateMonteFraseContainer(ex.ownSeedKey)
-                        : await getOrCreateGameContainer(
-                            doctorScopedSeedKey(ex.baseSeedKey, currentUserId), ex.title, currentUserId
-                        );
+                    const container = await getOrCreateGameContainer(
+                        doctorScopedSeedKey(ex.baseSeedKey, currentUserId), ex.title, currentUserId
+                    );
                     if (!container) throw new Error('Não consegui criar o container do exercício.');
                     exerciseId = container.id;
                 }
                 const { error: upsertErr } = await supabaseClient.from('patient_exercise_flags')
                     .upsert({ patient_id: patient.id, exercise_id: exerciseId, visible: newVisible, updated_at: new Date().toISOString() });
                 if (upsertErr) throw upsertErr;
-                const isMonteFrase = isGameContainerSeedKey(ex.seedKey || ex.seed_key || ex.ownSeedKey, MONTE_FRASE_SEED_KEY);
-                if (isMonteFrase && adminMonteFraseContainer) {
-                    const { error: adminFlagErr } = await supabaseClient.from('patient_exercise_flags')
-                        .upsert({ patient_id: patient.id, exercise_id: adminMonteFraseContainer.id, visible: newVisible, updated_at: new Date().toISOString() });
-                    if (adminFlagErr) throw adminFlagErr;
-                }
                 logAdminAction(newVisible ? 'release' : 'unrelease', 'exercise', displayTitle, `Paciente: ${patient.name || patient.email}`);
                 // Recarrega com o novo estado, mas preservando a rolagem — a
                 // lista pode ter dezenas de itens, e sem isso cada clique
@@ -14933,7 +14903,7 @@ async function renderPatientEvolution(body, patientUserId) {
 
     const { data: rows, error } = await supabaseClient
         .from('activity_results')
-        .select('created_at, session_id, item_text, moves, hints, seconds')
+        .select('created_at, session_id, exercise_id, item_text, moves, hints, seconds')
         .eq('user_id', patientUserId)
         .eq('activity', 'monte-frase')
         .order('created_at', { ascending: true })
@@ -14952,6 +14922,37 @@ async function renderPatientEvolution(body, patientUserId) {
         return;
     }
 
+    // Filtro por conjunto, quando o paciente jogou mais de um. Resultados de
+    // antes dos conjuntos (exercise_id vazio) só entram em "Todos".
+    const deckIds = [...new Set(rows.map(row => row.exercise_id).filter(Boolean))];
+    const details = document.createElement('div');
+    if (new Set(rows.map(row => row.exercise_id ?? null)).size < 2) {
+        body.appendChild(details);
+        renderEvolutionDetails(details, rows);
+        return;
+    }
+    const { data: decks } = await supabaseClient.from('exercises').select('id, title').in('id', deckIds);
+    if (body.dataset.requestId !== requestId) return;
+    const deckName = id => ((decks || []).find(deck => deck.id === id)?.title || 'Conjunto apagado').split('|')[0];
+    const filter = document.createElement('select');
+    filter.className = 'evolution-deck-filter';
+    filter.setAttribute('aria-label', 'Filtrar por conjunto');
+    [['all', 'Todos os conjuntos'], ...deckIds.map(id => [String(id), deckName(id)])].forEach(([value, label]) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        filter.appendChild(option);
+    });
+    const paint = () => renderEvolutionDetails(details,
+        filter.value === 'all' ? rows : rows.filter(row => String(row.exercise_id) === filter.value));
+    filter.addEventListener('change', paint);
+    body.append(filter, details);
+    paint();
+}
+
+function renderEvolutionDetails(body, rows) {
+    if (patientEvolutionChart) { patientEvolutionChart.destroy(); patientEvolutionChart = null; }
+    body.innerHTML = '';
     const sessions = groupEvolutionSessions(rows);
     const totalSeconds = rows.reduce((sum, row) => sum + row.seconds, 0);
 
@@ -15325,8 +15326,6 @@ function showEditBars() {
     if (completeSentenceManager) completeSentenceManager.style.display = (isAdmin || isDoctor) ? 'flex' : 'none';
     const completeSentenceNotify = document.getElementById('btn-notify-complete-sentence');
     if (completeSentenceNotify) completeSentenceNotify.style.display = isAdmin ? 'inline-flex' : 'none';
-    const monteFraseManager = document.getElementById('btn-manage-monte-frase');
-    if (monteFraseManager) monteFraseManager.style.display = (isAdmin || isDoctor) ? 'flex' : 'none';
 }
 
 // Mostra "Salvando..." e desabilita os botões de ação enquanto as cartas pendentes
