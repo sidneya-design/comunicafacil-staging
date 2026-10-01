@@ -15869,6 +15869,10 @@ function showEditBars() {
     ['btn-edit-core'].forEach(id => {
         const btn = document.getElementById(id);
         if (btn) btn.style.display = isAdmin ? 'inline-block' : 'none';
+        // A barra dos Essenciais só tem esse botão: sem ele, sobrava uma
+        // faixa vazia entre a barra de frases e os cards.
+        const bar = btn?.closest('.section-edit-bar');
+        if (bar) bar.style.display = isAdmin ? '' : 'none';
     });
     // Naming/afasia/memória/alfabeto/tópicos/virtudes: médico também
     // gerencia o próprio banco (Fases 10-11, 15-18).
