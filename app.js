@@ -1847,7 +1847,7 @@ async function getMyPatientUserIds() {
 }
 
 function setDoctorTab(tabName) {
-    const tabs = ['patients', 'usage'];
+    const tabs = ['patients', 'usage', 'evolution'];
 
     tabs.forEach(tab => {
         const btn = document.getElementById(`btn-doctor-tab-${tab}`);
@@ -1866,11 +1866,13 @@ function setDoctorTab(tabName) {
         loadDoctorPatients();
     } else if (tabName === 'usage') {
         getMyPatientUserIds().then(ids => renderUsageDashboard('doctor-usage', ids));
+    } else if (tabName === 'evolution') {
+        loadEvolutionTab('doctor');
     }
 }
 
 function setAdminTab(tabName) {
-    const tabs = ['users', 'companies', 'usage', 'modules', 'logs'];
+    const tabs = ['users', 'companies', 'usage', 'evolution', 'modules', 'logs'];
     
     tabs.forEach(tab => {
         const btn = document.getElementById(`btn-admin-tab-${tab}`);
@@ -1891,6 +1893,8 @@ function setAdminTab(tabName) {
         loadCompanies();
     } else if (tabName === 'usage') {
         renderUsageDashboard();
+    } else if (tabName === 'evolution') {
+        loadEvolutionTab('admin');
     } else if (tabName === 'modules') {
         applyModuleVisibility(); // Refreshes UI and re-renders the panel
     } else if (tabName === 'logs') {
@@ -13424,15 +13428,6 @@ async function loadAdminUsers() {
             passBtn.addEventListener('click', () => openChangePasswordModal(u.id, u.email));
             actionsCell.appendChild(passBtn);
 
-            if (u.role === 'patient') {
-                const evolutionBtn = document.createElement('button');
-                evolutionBtn.className = 'admin-edit-password-btn';
-                evolutionBtn.innerHTML = '<i class="fas fa-chart-line" aria-hidden="true"></i>';
-                evolutionBtn.title = 'Evolução do paciente no Monte a Frase';
-                evolutionBtn.addEventListener('click', () => openPatientEvolutionModal(u.id, u.name || u.email));
-                actionsCell.appendChild(evolutionBtn);
-            }
-
             if (u.role === 'doctor') {
                 const activityBtn = document.createElement('button');
                 activityBtn.className = 'admin-edit-password-btn';
@@ -13749,11 +13744,13 @@ document.getElementById('admin-users-company-filter')?.addEventListener('change'
 document.getElementById('btn-admin-tab-users')?.addEventListener('click', () => setAdminTab('users'));
 document.getElementById('btn-admin-tab-companies')?.addEventListener('click', () => setAdminTab('companies'));
 document.getElementById('btn-admin-tab-usage')?.addEventListener('click', () => setAdminTab('usage'));
+document.getElementById('btn-admin-tab-evolution')?.addEventListener('click', () => setAdminTab('evolution'));
 document.getElementById('btn-admin-tab-modules')?.addEventListener('click', () => setAdminTab('modules'));
 document.getElementById('btn-admin-tab-logs')?.addEventListener('click', () => setAdminTab('logs'));
 
 document.getElementById('btn-doctor-tab-patients')?.addEventListener('click', () => setDoctorTab('patients'));
 document.getElementById('btn-doctor-tab-usage')?.addEventListener('click', () => setDoctorTab('usage'));
+document.getElementById('btn-doctor-tab-evolution')?.addEventListener('click', () => setDoctorTab('evolution'));
 document.getElementById('btn-refresh-doctor-usage')?.addEventListener('click', () => {
     getMyPatientUserIds().then(ids => renderUsageDashboard('doctor-usage', ids));
 });
@@ -14092,13 +14089,7 @@ async function loadDoctorPatients() {
             btnViewAudios.className = 'admin-edit-password-btn';
             btnViewAudios.addEventListener('click', () => enterPatientContext(p, 'view-audio'));
 
-            const btnEvolution = document.createElement('button');
-            btnEvolution.innerHTML = '<i class="fas fa-chart-line" aria-hidden="true"></i>';
-            btnEvolution.title = 'Evolução do paciente no Monte a Frase';
-            btnEvolution.className = 'admin-edit-password-btn';
-            btnEvolution.addEventListener('click', () => openPatientEvolutionModal(p.userId, p.name || p.email));
-
-            tdActions.append(btnPassword, btnEvolution, btnModules, btnExercises, btnViewExercises, btnTopics, btnVirtues, btnCarometro, btnCarometroGlobal, btnBooks, btnReleaseBooks, btnMedias, btnViewMedias, btnAudios, btnViewAudios, btnToggleActive);
+            tdActions.append(btnPassword, btnModules, btnExercises, btnViewExercises, btnTopics, btnVirtues, btnCarometro, btnCarometroGlobal, btnBooks, btnReleaseBooks, btnMedias, btnViewMedias, btnAudios, btnViewAudios, btnToggleActive);
             tr.append(tdName, tdEmail, tdStatus, tdCreated, tdLastSignIn, tdActions);
             tbody.appendChild(tr);
         });
@@ -14776,12 +14767,12 @@ document.getElementById('btn-close-patient-exercises')?.addEventListener('click'
 // =============================================
 // EVOLUÇÃO DO PACIENTE (activity_results)
 // Cada frase montada no Monte a Frase grava movimentos, pistas e segundos
-// (monte-frase.js → logResult). Aqui o médico (ou o admin) vê isso agrupado
-// por sessão — cada vez que o paciente abriu o exercício — num gráfico de
-// médias por frase, na lista de sessões e nas frases com mais dificuldade.
+// (monte-frase.js → logResult). Na aba "Evolução" (Meus Pacientes do médico
+// e painel do admin) isso aparece agrupado por sessão — cada vez que o
+// paciente abriu o exercício — num gráfico de médias por frase, na lista de
+// sessões e nas frases com mais dificuldade.
 // A RLS já limita a leitura aos pacientes do médico / da clínica.
 // =============================================
-const patientEvolutionModal = document.getElementById('patient-evolution-modal');
 let patientEvolutionChart = null;
 
 function formatEvolutionDuration(totalSeconds) {
@@ -14878,11 +14869,67 @@ function renderEvolutionChart(canvas, sessions) {
     });
 }
 
-async function openPatientEvolutionModal(patientUserId, patientName) {
-    document.getElementById('patient-evolution-subtitle').textContent = patientName || '';
-    const body = document.getElementById('patient-evolution-body');
+// Lista de pacientes do seletor da aba: o médico vê os dele (e dos colegas
+// da empresa, como em Meus Pacientes); o admin vê todos os pacientes.
+async function listEvolutionPatients(prefix) {
+    if (prefix === 'doctor') {
+        const { patients } = await callDoctorPatientsFn('list');
+        return (patients || []).map(p => ({ id: p.userId, name: p.name || p.email }));
+    }
+    const { users } = await callAdminUsersFn('list');
+    return (users || []).filter(u => u.role === 'patient').map(u => ({ id: u.id, name: u.name || u.email }));
+}
+
+async function loadEvolutionTab(prefix) {
+    const select = document.getElementById(`${prefix}-evolution-patient`);
+    const body = document.getElementById(`${prefix}-evolution-body`);
+    if (!select || !body) return;
+    const previous = select.value;
+    let patients = [];
+    try {
+        patients = await listEvolutionPatients(prefix);
+    } catch (err) {
+        body.textContent = 'Não consegui carregar a lista de pacientes: ' + (err.message || err);
+        return;
+    }
+    patients.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+    select.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = patients.length ? 'Escolha um paciente' : 'Nenhum paciente cadastrado';
+    select.appendChild(placeholder);
+    patients.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p.id;
+        option.textContent = p.name || '-';
+        select.appendChild(option);
+    });
+    select.value = patients.some(p => p.id === previous) ? previous : '';
+    renderPatientEvolution(body, select.value);
+}
+
+['doctor', 'admin'].forEach(prefix => {
+    const body = () => document.getElementById(`${prefix}-evolution-body`);
+    const select = document.getElementById(`${prefix}-evolution-patient`);
+    select?.addEventListener('change', () => renderPatientEvolution(body(), select.value));
+    document.getElementById(`btn-refresh-${prefix}-evolution`)?.addEventListener('click', () => renderPatientEvolution(body(), select.value));
+});
+
+async function renderPatientEvolution(body, patientUserId) {
+    if (!body) return;
+    // Troca rápida de paciente: só a última consulta pinta a tela.
+    const requestId = String(Date.now() + Math.random());
+    body.dataset.requestId = requestId;
+    if (patientEvolutionChart) { patientEvolutionChart.destroy(); patientEvolutionChart = null; }
+    body.innerHTML = '';
+    if (!patientUserId) {
+        const hint = document.createElement('p');
+        hint.className = 'media-hint';
+        hint.textContent = 'Escolha um paciente acima para ver a evolução dele no Monte a Frase.';
+        body.appendChild(hint);
+        return;
+    }
     body.textContent = 'Carregando...';
-    if (patientEvolutionModal) patientEvolutionModal.style.display = 'flex';
 
     const { data: rows, error } = await supabaseClient
         .from('activity_results')
@@ -14891,6 +14938,7 @@ async function openPatientEvolutionModal(patientUserId, patientName) {
         .eq('activity', 'monte-frase')
         .order('created_at', { ascending: true })
         .limit(5000);
+    if (body.dataset.requestId !== requestId) return;
     body.innerHTML = '';
     if (error) {
         body.textContent = 'Não consegui carregar a evolução: ' + error.message;
@@ -14975,11 +15023,6 @@ async function openPatientEvolutionModal(patientUserId, patientName) {
         hardest.map(item => [item.text, item.attempts, formatEvolutionAverage(item.movesAvg), formatEvolutionAverage(item.hintsAvg)])
     ));
 }
-
-document.getElementById('btn-close-patient-evolution')?.addEventListener('click', () => {
-    if (patientEvolutionModal) patientEvolutionModal.style.display = 'none';
-    if (patientEvolutionChart) { patientEvolutionChart.destroy(); patientEvolutionChart = null; }
-});
 
 // Monta a URL do iframe de Livros: propaga ?sb=staging (senão o iframe
 // sempre falaria com produção, mesmo testando o resto do app no staging) e,

@@ -869,6 +869,7 @@
                         <button class="admin-tab active" id="btn-admin-tab-users" data-admin-tab="users" type="button" role="tab" aria-selected="true">Usuários</button>
                         <button class="admin-tab" id="btn-admin-tab-companies" data-admin-tab="companies" type="button" role="tab" aria-selected="false">Empresas</button>
                         <button class="admin-tab" id="btn-admin-tab-usage" data-admin-tab="usage" type="button" role="tab" aria-selected="false">Uso e insights</button>
+                        <button class="admin-tab" id="btn-admin-tab-evolution" data-admin-tab="evolution" type="button" role="tab" aria-selected="false">Evolução</button>
                         <button class="admin-tab" id="btn-admin-tab-modules" data-admin-tab="modules" type="button" role="tab" aria-selected="false">Módulos</button>
                         <button class="admin-tab" id="btn-admin-tab-logs" data-admin-tab="logs" type="button" role="tab" aria-selected="false">Logs</button>
                     </div>
@@ -1050,6 +1051,27 @@
                         </section>
                     </section>
 
+                    <section class="admin-tab-panel" id="admin-evolution-panel" role="tabpanel" aria-labelledby="btn-admin-tab-evolution">
+                        <section class="admin-analytics-panel">
+                            <div class="admin-analytics-hero">
+                                <div>
+                                    <div class="admin-panel-kicker"><i class="fas fa-chart-line" aria-hidden="true"></i> Evolução no Monte a Frase</div>
+                                    <h3>Movimentos, pistas e tempo de cada paciente, sessão a sessão.</h3>
+                                    <p>Escolha um paciente para ver como ele vem montando as frases.</p>
+                                </div>
+                                <div class="admin-analytics-actions">
+                                    <select id="admin-evolution-patient" class="admin-analytics-select" aria-label="Escolher paciente">
+                                        <option value="">Escolha um paciente</option>
+                                    </select>
+                                    <button type="button" class="admin-analytics-action" id="btn-refresh-admin-evolution">
+                                        <i class="fas fa-rotate" aria-hidden="true"></i> Atualizar
+                                    </button>
+                                </div>
+                            </div>
+                            <section class="admin-analytics-card" id="admin-evolution-body"></section>
+                        </section>
+                    </section>
+
                     <!-- Aba: Controle de Módulos -->
                     <section class="admin-tab-panel" id="admin-modules-panel" role="tabpanel" aria-labelledby="btn-admin-tab-modules">
                         <div class="media-header">
@@ -1103,6 +1125,7 @@
                     <div class="admin-tabbar" role="tablist" aria-label="Meus Pacientes">
                         <button class="admin-tab active" id="btn-doctor-tab-patients" data-doctor-tab="patients" type="button" role="tab" aria-selected="true">Pacientes</button>
                         <button class="admin-tab" id="btn-doctor-tab-usage" data-doctor-tab="usage" type="button" role="tab" aria-selected="false">Uso e insights</button>
+                        <button class="admin-tab" id="btn-doctor-tab-evolution" data-doctor-tab="evolution" type="button" role="tab" aria-selected="false">Evolução</button>
                     </div>
 
                     <section class="admin-tab-panel active" id="doctor-patients-panel" role="tabpanel" aria-labelledby="btn-doctor-tab-patients">
@@ -1249,6 +1272,27 @@
                         </section>
                     </section>
 
+                    <section class="admin-tab-panel" id="doctor-evolution-panel" role="tabpanel" aria-labelledby="btn-doctor-tab-evolution">
+                        <section class="admin-analytics-panel">
+                            <div class="admin-analytics-hero">
+                                <div>
+                                    <div class="admin-panel-kicker"><i class="fas fa-chart-line" aria-hidden="true"></i> Evolução no Monte a Frase</div>
+                                    <h3>Movimentos, pistas e tempo de cada paciente, sessão a sessão.</h3>
+                                    <p>Escolha um dos seus pacientes para ver como ele vem montando as frases.</p>
+                                </div>
+                                <div class="admin-analytics-actions">
+                                    <select id="doctor-evolution-patient" class="admin-analytics-select" aria-label="Escolher paciente">
+                                        <option value="">Escolha um paciente</option>
+                                    </select>
+                                    <button type="button" class="admin-analytics-action" id="btn-refresh-doctor-evolution">
+                                        <i class="fas fa-rotate" aria-hidden="true"></i> Atualizar
+                                    </button>
+                                </div>
+                            </div>
+                            <section class="admin-analytics-card" id="doctor-evolution-body"></section>
+                        </section>
+                    </section>
+
                 </main>
 
                 <!-- Modal: Módulos por Paciente -->
@@ -1275,17 +1319,6 @@
                     </div>
                 </div>
 
-                <!-- Modal: Evolução do paciente nas atividades (activity_results) -->
-                <div class="modal-overlay" id="patient-evolution-modal" role="dialog" aria-modal="true" aria-labelledby="patient-evolution-modal-title">
-                    <div class="modal-content evolution-modal-content">
-                        <div class="modal-header">
-                            <h2 id="patient-evolution-modal-title">Evolução no Monte a Frase</h2>
-                            <button class="close-modal-btn" id="btn-close-patient-evolution" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
-                        </div>
-                        <p class="media-hint" id="patient-evolution-subtitle" style="margin-bottom: 1rem;"></p>
-                        <div id="patient-evolution-body"></div>
-                    </div>
-                </div>
 
                 <!-- Modal: Tópicos liberados por Paciente -->
                 <div class="modal-overlay" id="patient-topics-modal" role="dialog" aria-modal="true" aria-labelledby="patient-topics-modal-title">
@@ -2357,12 +2390,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=41">
+    <link rel="stylesheet" href="style.css?v=42">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=101"></script>
+    <script defer src="app.js?v=102"></script>
 </body>
 
 
