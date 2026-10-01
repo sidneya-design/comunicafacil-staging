@@ -29,6 +29,88 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#039;");
 }
 
+// O Supabase bloqueia SMTP nas portas 25 e 587. O Gmail usa TLS direto na 465.
+function gmailTransporter() {
+  return nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    auth: { user: GMAIL_SMTP_USER, pass: GMAIL_APP_PASSWORD },
+  });
+}
+
+// Lembrete do médico ("hora de praticar") para um ou vários pacientes, com
+// recado opcional. Cada paciente lembrado ganha uma linha em
+// patient_reminders (o app mostra ao paciente até ele clicar em "Entendi") e
+// quem tem e-mail recebe a mensagem — num envio só, em cópia oculta.
+// Pode enviar: o médico do paciente, um colega da mesma empresa (mesma regra
+// de is_doctor_of_patient) ou admin/editor.
+async function sendReminders(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  caller: { id: string; user_metadata?: Record<string, unknown> },
+  callerRole: string,
+  body: Record<string, unknown>,
+) {
+  const patientIds = [...new Set((Array.isArray(body.patientIds) ? body.patientIds : []).map(String))];
+  if (!patientIds.length) return json({ error: "Escolha pelo menos um paciente." }, 400);
+  if (patientIds.length > 300) return json({ error: "Envie para no máximo 300 pacientes por vez." }, 400);
+  const message = String(body.message ?? "").trim().slice(0, 500) || null;
+
+  const { data: patients, error: patientsError } = await admin
+    .from("patients")
+    .select("id, user_id, doctor_user_id, company_id, active")
+    .in("id", patientIds);
+  if (patientsError) throw patientsError;
+  if ((patients ?? []).length !== patientIds.length) return json({ error: "Paciente não encontrado." }, 404);
+
+  const isPrivileged = ["editor", "admin"].includes(callerRole);
+  if (!isPrivileged) {
+    const { data: member } = await admin.from("company_members").select("company_id").eq("user_id", caller.id).maybeSingle();
+    const callerCompany = member?.company_id ?? null;
+    const notMine = patients.some((p: { doctor_user_id: string; company_id: string | null }) =>
+      p.doctor_user_id !== caller.id && !(callerCompany && p.company_id === callerCompany));
+    if (callerRole !== "doctor" || notMine) {
+      return json({ error: "Você só pode enviar lembretes para os seus pacientes." }, 403);
+    }
+  }
+
+  const activePatients = patients.filter((p: { active: boolean }) => p.active);
+  if (!activePatients.length) return json({ recipientCount: 0, emailCount: 0 });
+
+  const senderName = String(caller.user_metadata?.full_name ?? "").trim() || null;
+  const { error: insertError } = await admin.from("patient_reminders").insert(
+    activePatients.map((p: { id: string }) => ({ patient_id: p.id, sender_user_id: caller.id, sender_name: senderName, message })),
+  );
+  if (insertError) throw insertError;
+
+  const emails: string[] = [];
+  for (const p of activePatients) {
+    const { data: user } = await admin.auth.admin.getUserById(p.user_id);
+    if (user?.user?.email && !user.user.banned_until) emails.push(user.user.email);
+  }
+
+  if (emails.length) {
+    const who = senderName ? escapeHtml(senderName) : "Seu médico";
+    const messageHtml = message
+      ? `<div style="margin:18px 0 0;padding:14px 16px;background:#f3f4f6;border-radius:10px;font-size:17px;line-height:1.6;color:#1f2937"><strong>Recado:</strong><br>${escapeHtml(message).replaceAll("\n", "<br>")}</div>`
+      : "";
+    const linkHtml = APP_PUBLIC_URL
+      ? `<p style="margin:20px 0 0"><a href="${escapeHtml(APP_PUBLIC_URL)}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:700;font-size:16px;line-height:1">Abrir Comunica Fácil</a></p>`
+      : "";
+    await gmailTransporter().sendMail({
+      from: `Comunica Fácil <${GMAIL_SMTP_USER}>`,
+      to: GMAIL_SMTP_USER,
+      bcc: emails,
+      subject: "Lembrete: hora de praticar no Comunica Fácil",
+      text: `Olá! ${senderName ?? "Seu médico"} lembrou você de praticar seus exercícios no Comunica Fácil.${message ? `\n\nRecado: ${message}` : ""}${APP_PUBLIC_URL ? `\n\nAbra o Comunica Fácil: ${APP_PUBLIC_URL}` : ""}`,
+      html: `<div style="margin:0;background:#ffffff;font-family:Arial,sans-serif;color:#1f2937"><div style="max-width:560px;padding:28px 24px 32px"><h1 style="margin:0 0 18px;font-size:28px;line-height:1.15;color:#2563eb;font-weight:800">Hora de praticar!</h1><p style="margin:0 0 14px;font-size:18px;line-height:1.5;color:#111827">Olá!</p><p style="margin:0;font-size:18px;line-height:1.6;color:#1f2937"><strong>${who}</strong> lembrou você de praticar seus exercícios no Comunica Fácil.</p>${messageHtml}${linkHtml}<p style="margin:18px 0 0;font-size:14px;line-height:1.5;color:#6b7280">Este é um lembrete enviado pelo Comunica Fácil.</p></div></div>`,
+    });
+  }
+
+  return json({ recipientCount: activePatients.length, emailCount: emails.length });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -58,6 +140,9 @@ Deno.serve(async (req) => {
     if (roleError) throw roleError;
 
     const body = await req.json();
+    if (body?.kind === "reminder") {
+      return await sendReminders(admin, callerData.user, callerRole?.role ?? "", body);
+    }
     const title = String(body?.title ?? "").trim().slice(0, 160);
     const category = String(body?.category ?? "Atividade").trim().slice(0, 40);
     const patientId = body?.patientId ? String(body.patientId) : null;
@@ -124,15 +209,7 @@ Deno.serve(async (req) => {
       ? `<p style="margin:20px 0 0"><a href="${escapeHtml(APP_PUBLIC_URL)}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:14px 22px;border-radius:10px;font-weight:700;font-size:16px;line-height:1">Abrir Comunica Fácil</a></p>`
       : "";
 
-    // O Supabase bloqueia SMTP nas portas 25 e 587. O Gmail usa TLS direto na 465.
-    const transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true,
-      auth: { user: GMAIL_SMTP_USER, pass: GMAIL_APP_PASSWORD },
-    });
-
-    await transporter.sendMail({
+    await gmailTransporter().sendMail({
       from: `Comunica Fácil <${GMAIL_SMTP_USER}>`,
       to: GMAIL_SMTP_USER,
       bcc: recipients,

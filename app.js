@@ -1847,7 +1847,7 @@ async function getMyPatientUserIds() {
 }
 
 function setDoctorTab(tabName) {
-    const tabs = ['patients', 'usage', 'evolution'];
+    const tabs = ['patients', 'usage', 'evolution', 'reminders'];
 
     tabs.forEach(tab => {
         const btn = document.getElementById(`btn-doctor-tab-${tab}`);
@@ -1868,11 +1868,13 @@ function setDoctorTab(tabName) {
         getMyPatientUserIds().then(ids => renderUsageDashboard('doctor-usage', ids));
     } else if (tabName === 'evolution') {
         loadEvolutionTab('doctor');
+    } else if (tabName === 'reminders') {
+        loadRemindersTab('doctor');
     }
 }
 
 function setAdminTab(tabName) {
-    const tabs = ['users', 'companies', 'usage', 'evolution', 'modules', 'logs'];
+    const tabs = ['users', 'companies', 'usage', 'evolution', 'reminders', 'modules', 'logs'];
     
     tabs.forEach(tab => {
         const btn = document.getElementById(`btn-admin-tab-${tab}`);
@@ -1895,6 +1897,8 @@ function setAdminTab(tabName) {
         renderUsageDashboard();
     } else if (tabName === 'evolution') {
         loadEvolutionTab('admin');
+    } else if (tabName === 'reminders') {
+        loadRemindersTab('admin');
     } else if (tabName === 'modules') {
         applyModuleVisibility(); // Refreshes UI and re-renders the panel
     } else if (tabName === 'logs') {
@@ -13178,6 +13182,7 @@ if (supabaseClient) {
                     .from('patients').select('id, doctor_user_id').eq('user_id', userId).maybeSingle();
                 currentPatientId = patientRow?.id || null;
                 currentPatientDoctorUserId = patientRow?.doctor_user_id || null;
+                showPatientReminders();
             }
             startUsageSession({
                 id: userId,
@@ -13849,12 +13854,14 @@ document.getElementById('btn-admin-tab-users')?.addEventListener('click', () => 
 document.getElementById('btn-admin-tab-companies')?.addEventListener('click', () => setAdminTab('companies'));
 document.getElementById('btn-admin-tab-usage')?.addEventListener('click', () => setAdminTab('usage'));
 document.getElementById('btn-admin-tab-evolution')?.addEventListener('click', () => setAdminTab('evolution'));
+document.getElementById('btn-admin-tab-reminders')?.addEventListener('click', () => setAdminTab('reminders'));
 document.getElementById('btn-admin-tab-modules')?.addEventListener('click', () => setAdminTab('modules'));
 document.getElementById('btn-admin-tab-logs')?.addEventListener('click', () => setAdminTab('logs'));
 
 document.getElementById('btn-doctor-tab-patients')?.addEventListener('click', () => setDoctorTab('patients'));
 document.getElementById('btn-doctor-tab-usage')?.addEventListener('click', () => setDoctorTab('usage'));
 document.getElementById('btn-doctor-tab-evolution')?.addEventListener('click', () => setDoctorTab('evolution'));
+document.getElementById('btn-doctor-tab-reminders')?.addEventListener('click', () => setDoctorTab('reminders'));
 document.getElementById('btn-refresh-doctor-usage')?.addEventListener('click', () => {
     getMyPatientUserIds().then(ids => renderUsageDashboard('doctor-usage', ids));
 });
@@ -14263,6 +14270,188 @@ async function openPatientModulesModal(patient) {
         list.appendChild(row);
     });
 }
+
+// =============================================
+// LEMBRETES PARA OS PACIENTES
+// Aba "Lembretes" do médico (Meus Pacientes, só os pacientes dele e dos
+// colegas da empresa) e do admin (todos os pacientes): escolhe um ou vários
+// pacientes e envia na hora um lembrete de praticar, com recado opcional. A
+// função notify-users (kind 'reminder') confere a permissão, grava em
+// patient_reminders e manda o e-mail; o paciente vê o lembrete ao abrir o app
+// (showPatientReminders) até clicar em "Entendi". Embaixo, os últimos
+// lembretes enviados e se o paciente já viu.
+// =============================================
+const reminderPatientsByPrefix = { doctor: [], admin: [] };
+
+// Pacientes ativos que dá pra lembrar: { id (patients.id), name, email }.
+async function listReminderPatients(prefix) {
+    if (prefix === 'doctor') {
+        const { patients } = await callDoctorPatientsFn('list');
+        doctorPatientsCache = patients || [];
+        return doctorPatientsCache.filter(p => p.active).map(p => ({ id: p.id, name: p.name || p.email, email: p.email }));
+    }
+    const [{ data: rows, error }, { users }] = await Promise.all([
+        supabaseClient.from('patients').select('id, user_id, name, active'),
+        callAdminUsersFn('list')
+    ]);
+    if (error) throw error;
+    const emailByUserId = new Map((users || []).map(u => [u.id, u.email]));
+    return (rows || []).filter(p => p.active)
+        .map(p => ({ id: p.id, name: p.name || emailByUserId.get(p.user_id), email: emailByUserId.get(p.user_id) || null }));
+}
+
+function reminderCheckboxes(prefix) {
+    return [...document.querySelectorAll(`#${prefix}-reminder-patient-list input[type="checkbox"]`)];
+}
+
+function updateReminderSelection(prefix) {
+    const boxes = reminderCheckboxes(prefix);
+    const checked = boxes.filter(box => box.checked).length;
+    const sendBtn = document.getElementById(`btn-${prefix}-reminder-send`);
+    sendBtn.disabled = checked === 0;
+    sendBtn.textContent = checked > 1 ? `Enviar lembrete (${checked})` : 'Enviar lembrete';
+    document.getElementById(`${prefix}-reminder-select-all`).checked = boxes.length > 0 && checked === boxes.length;
+}
+
+async function loadRemindersTab(prefix) {
+    const list = document.getElementById(`${prefix}-reminder-patient-list`);
+    if (!list) return;
+    const previouslyChecked = new Set(reminderCheckboxes(prefix).filter(box => box.checked).map(box => box.value));
+    list.textContent = 'Carregando...';
+    let patients = [];
+    try {
+        patients = await listReminderPatients(prefix);
+    } catch (err) {
+        list.textContent = 'Não consegui carregar os pacientes: ' + (err.message || err);
+        return;
+    }
+    patients.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+    reminderPatientsByPrefix[prefix] = patients;
+    list.innerHTML = '';
+    if (!patients.length) list.innerHTML = '<p class="media-hint">Nenhum paciente ativo para lembrar.</p>';
+    patients.forEach(p => {
+        const label = document.createElement('label');
+        label.className = 'reminder-patient';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.value = p.id;
+        box.checked = previouslyChecked.has(p.id);
+        const name = document.createElement('span');
+        name.textContent = p.name || '-';
+        const email = document.createElement('small');
+        email.textContent = p.email || 'sem e-mail (vê só no app)';
+        label.append(box, name, email);
+        list.appendChild(label);
+    });
+    updateReminderSelection(prefix);
+    renderReminderHistory(prefix);
+}
+
+async function renderReminderHistory(prefix) {
+    const box = document.getElementById(`${prefix}-reminder-history`);
+    if (!box) return;
+    // A RLS já limita: médico vê os dos pacientes dele, admin vê todos.
+    const { data: rows, error } = await supabaseClient
+        .from('patient_reminders')
+        .select('created_at, patient_id, sender_name, message, read_at')
+        .order('created_at', { ascending: false })
+        .limit(30);
+    box.innerHTML = '';
+    if (error) {
+        box.textContent = 'Não consegui carregar o histórico: ' + error.message;
+        return;
+    }
+    if (!rows?.length) {
+        box.innerHTML = '<p class="media-hint">Nenhum lembrete enviado ainda.</p>';
+        return;
+    }
+    const nameById = new Map(reminderPatientsByPrefix[prefix].map(p => [p.id, p.name]));
+    const formatDate = value => new Date(value).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    box.appendChild(evolutionTable(
+        ['Enviado em', 'Paciente', 'Enviado por', 'Recado', 'Visto pelo paciente'],
+        rows.map(r => [
+            formatDate(r.created_at),
+            nameById.get(r.patient_id) || 'Paciente inativo',
+            r.sender_name || '-',
+            r.message || '-',
+            r.read_at ? formatDate(r.read_at) : 'Ainda não'
+        ])
+    ));
+}
+
+['doctor', 'admin'].forEach(prefix => {
+    document.getElementById(`${prefix}-reminder-patient-list`)?.addEventListener('change', () => updateReminderSelection(prefix));
+    document.getElementById(`${prefix}-reminder-select-all`)?.addEventListener('change', (ev) => {
+        reminderCheckboxes(prefix).forEach(box => { box.checked = ev.target.checked; });
+        updateReminderSelection(prefix);
+    });
+    document.getElementById(`${prefix}-reminder-form`)?.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const selected = reminderCheckboxes(prefix).filter(box => box.checked);
+        if (!selected.length) return;
+        const messageInput = document.getElementById(`${prefix}-reminder-message`);
+        const message = messageInput.value.trim();
+        const nameOf = id => reminderPatientsByPrefix[prefix].find(p => p.id === id)?.name || 'paciente';
+        setNotifyModal('sending', 'Enviando lembrete…', 'Só um instante.');
+        const { data, error } = await supabaseClient.functions.invoke('notify-users', {
+            body: { kind: 'reminder', patientIds: selected.map(box => box.value), message }
+        });
+        if (error) {
+            console.error('Erro ao enviar lembrete:', error);
+            setNotifyModal('error', 'Lembrete não enviado', 'Não foi possível enviar o lembrete. Tente de novo em instantes.');
+            return;
+        }
+        logAdminAction('create', 'reminder', selected.length === 1 ? nameOf(selected[0].value) : `${selected.length} pacientes`, message || null);
+        const count = data?.recipientCount ?? selected.length;
+        const emails = data?.emailCount ?? 0;
+        setNotifyModal('success', 'Lembrete enviado', count === 1
+            ? `${nameOf(selected[0].value)} vai ver o lembrete ao abrir o app${emails ? ' e também recebe por e-mail' : ''}.`
+            : `${count} pacientes vão ver o lembrete ao abrir o app; ${emails} ${emails === 1 ? 'recebe' : 'recebem'} também por e-mail.`);
+        // Enviado: limpa o recado e a seleção, e o histórico já mostra o novo.
+        messageInput.value = '';
+        reminderCheckboxes(prefix).forEach(box => { box.checked = false; });
+        updateReminderSelection(prefix);
+        renderReminderHistory(prefix);
+    });
+});
+
+// Paciente: lembretes ainda não vistos aparecem ao abrir o app.
+let patientReminderIds = [];
+
+async function showPatientReminders() {
+    if (!supabaseClient || !currentPatientId) return;
+    const { data: reminders, error } = await supabaseClient
+        .from('patient_reminders')
+        .select('id, created_at, sender_name, message')
+        .eq('patient_id', currentPatientId)
+        .is('read_at', null)
+        .order('created_at', { ascending: false })
+        .limit(10);
+    if (error || !reminders?.length) return;
+    patientReminderIds = reminders.map(r => r.id);
+    document.getElementById('patient-reminder-text').textContent =
+        `${reminders[0].sender_name || 'Seu médico'} lembrou você de praticar seus exercícios no Comunica Fácil.`;
+    const messages = document.getElementById('patient-reminder-messages');
+    messages.innerHTML = '';
+    reminders.filter(r => r.message).forEach(r => {
+        const note = document.createElement('blockquote');
+        note.className = 'patient-reminder-message';
+        note.textContent = r.message;
+        messages.appendChild(note);
+    });
+    document.getElementById('patient-reminder-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('btn-patient-reminder-ok')?.focus(), 50);
+}
+
+document.getElementById('btn-patient-reminder-ok')?.addEventListener('click', async () => {
+    document.getElementById('patient-reminder-modal').style.display = 'none';
+    if (!patientReminderIds.length) return;
+    const ids = patientReminderIds;
+    patientReminderIds = [];
+    const { error } = await supabaseClient.from('patient_reminders')
+        .update({ read_at: new Date().toISOString() }).in('id', ids);
+    if (error) console.warn('Não consegui marcar o lembrete como visto:', error.message);
+});
 
 document.getElementById('btn-close-patient-modules')?.addEventListener('click', () => {
     if (patientModulesModal) patientModulesModal.style.display = 'none';

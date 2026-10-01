@@ -4745,6 +4745,24 @@ button, .action-btn { touch-action: manipulation; }
 .notify-modal-content p { margin: 0; color: #52514e; line-height: 1.5; font-size: 0.98rem; }
 .notify-modal-footer { display: flex; justify-content: center; gap: 10px; margin-top: 22px; }
 .notify-modal-footer button { min-width: 120px; border-radius: 10px; }
+/* Lembretes (abas "Lembretes" do médico e do admin; aviso ao paciente) */
+.notify-modal-icon.is-reminder { background: #fff4e5; color: #ef6c00; }
+.reminder-form { display: flex; flex-direction: column; gap: 4px; }
+.reminder-preview { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; margin-bottom: 16px; background: #fff8ec; border: 1px solid #ffe0b2; border-radius: 10px; color: #52514e; font-size: 0.92rem; line-height: 1.5; }
+.reminder-preview i { color: #ef6c00; margin-top: 3px; }
+.reminder-form textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font: inherit; font-size: 15px; resize: vertical; }
+.reminder-label { font-size: 14px; color: #333; font-weight: bold; }
+.reminder-all { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.reminder-patient-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; max-height: 320px; overflow-y: auto; padding: 2px; }
+.reminder-patient { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: center; padding: 10px 12px; background: #f5f6f8; border: 1px solid transparent; border-radius: 10px; cursor: pointer; }
+.reminder-patient:has(input:checked) { background: #e3f2fd; border-color: #90caf9; }
+.reminder-patient input { grid-row: span 2; width: 18px; height: 18px; accent-color: #1976d2; }
+.reminder-patient span { font-weight: 600; color: #1f2933; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reminder-patient small { color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reminder-actions { display: flex; justify-content: flex-end; }
+.reminder-actions .btn-primary { border-radius: 10px; }
+.reminder-actions .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.patient-reminder-message { margin: 14px 0 0; padding: 12px 14px; background: #f3f4f6; border-left: 4px solid #ef6c00; border-radius: 8px; text-align: left; color: #1f2933; font-size: 1rem; line-height: 1.5; white-space: pre-line; }
 .release-kind-tag { display: inline-block; margin-right: 8px; padding: 2px 8px; border-radius: 999px; background: #e3f2fd; color: #0d47a1; font-size: 0.75rem; font-weight: 600; vertical-align: middle; }
 .evolution-deck-filter { align-self: flex-start; margin-bottom: 1rem; padding: 8px 12px; border: 1px solid #d5d9de; border-radius: 8px; background: #fff; font: inherit; color: #1f2933; cursor: pointer; }
 .evolution-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 1rem; }

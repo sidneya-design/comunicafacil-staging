@@ -873,6 +873,7 @@
                         <button class="admin-tab" id="btn-admin-tab-companies" data-admin-tab="companies" type="button" role="tab" aria-selected="false">Empresas</button>
                         <button class="admin-tab" id="btn-admin-tab-usage" data-admin-tab="usage" type="button" role="tab" aria-selected="false">Uso e insights</button>
                         <button class="admin-tab" id="btn-admin-tab-evolution" data-admin-tab="evolution" type="button" role="tab" aria-selected="false">Evolução</button>
+                        <button class="admin-tab" id="btn-admin-tab-reminders" data-admin-tab="reminders" type="button" role="tab" aria-selected="false">Lembretes</button>
                         <button class="admin-tab" id="btn-admin-tab-modules" data-admin-tab="modules" type="button" role="tab" aria-selected="false">Módulos</button>
                         <button class="admin-tab" id="btn-admin-tab-logs" data-admin-tab="logs" type="button" role="tab" aria-selected="false">Logs</button>
                     </div>
@@ -1075,6 +1076,40 @@
                         </section>
                     </section>
 
+                    <section class="admin-tab-panel" id="admin-reminders-panel" role="tabpanel" aria-labelledby="btn-admin-tab-reminders">
+                        <section class="admin-analytics-panel">
+                            <div class="admin-analytics-hero">
+                                <div>
+                                    <div class="admin-panel-kicker"><i class="fas fa-bell" aria-hidden="true"></i> Lembretes</div>
+                                    <h3>Lembre os pacientes de praticar.</h3>
+                                    <p>Escolha um ou vários pacientes de qualquer clínica. O lembrete chega por e-mail e aparece no app do paciente.</p>
+                                </div>
+                            </div>
+                            <form class="admin-analytics-card reminder-form" id="admin-reminder-form">
+                                <div class="reminder-preview">
+                                    <i class="fas fa-bell" aria-hidden="true"></i>
+                                    <span>O paciente recebe por e-mail e vê ao abrir o app: <strong>“Hora de praticar! (seu nome) lembrou você de praticar seus exercícios no Comunica Fácil.”</strong> E o recado, se você escrever um.</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="admin-reminder-message">Recado (opcional)</label>
+                                    <textarea id="admin-reminder-message" rows="3" maxlength="500" placeholder="Ex: Não esqueça do Monte a Frase desta semana!"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <span class="reminder-label">Para quem</span>
+                                    <label class="reminder-all"><input type="checkbox" id="admin-reminder-select-all"> Todos os pacientes</label>
+                                    <div class="reminder-patient-list" id="admin-reminder-patient-list"></div>
+                                </div>
+                                <div class="reminder-actions">
+                                    <button type="submit" class="btn-primary" id="btn-admin-reminder-send" disabled>Enviar lembrete</button>
+                                </div>
+                            </form>
+                            <section class="admin-analytics-card">
+                                <h3 class="evolution-section-title">Últimos lembretes enviados</h3>
+                                <div id="admin-reminder-history"></div>
+                            </section>
+                        </section>
+                    </section>
+
                     <!-- Aba: Controle de Módulos -->
                     <section class="admin-tab-panel" id="admin-modules-panel" role="tabpanel" aria-labelledby="btn-admin-tab-modules">
                         <div class="media-header">
@@ -1129,14 +1164,14 @@
                         <button class="admin-tab active" id="btn-doctor-tab-patients" data-doctor-tab="patients" type="button" role="tab" aria-selected="true">Pacientes</button>
                         <button class="admin-tab" id="btn-doctor-tab-usage" data-doctor-tab="usage" type="button" role="tab" aria-selected="false">Uso e insights</button>
                         <button class="admin-tab" id="btn-doctor-tab-evolution" data-doctor-tab="evolution" type="button" role="tab" aria-selected="false">Evolução</button>
+                        <button class="admin-tab" id="btn-doctor-tab-reminders" data-doctor-tab="reminders" type="button" role="tab" aria-selected="false">Lembretes</button>
                     </div>
 
                     <section class="admin-tab-panel active" id="doctor-patients-panel" role="tabpanel" aria-labelledby="btn-doctor-tab-patients">
                         <div class="doctor-patients-header">
                             <button class="add-media-btn" id="btn-open-new-patient">
                                 <i class="fas fa-user-plus" aria-hidden="true"></i> Novo paciente
-                            </button>
-                            <p class="media-hint">Crie contas de pacientes e gerencie o acesso deles.</p>
+                            </button>                            <p class="media-hint">Crie contas de pacientes e gerencie o acesso deles.</p>
                         </div>
                         <div id="doctor-patients-feedback" class="admin-feedback" role="status" aria-live="polite" style="display:none;"></div>
                         <div class="admin-table-wrapper">
@@ -1293,6 +1328,40 @@
                                 </div>
                             </div>
                             <section class="admin-analytics-card" id="doctor-evolution-body"></section>
+                        </section>
+                    </section>
+
+                    <section class="admin-tab-panel" id="doctor-reminders-panel" role="tabpanel" aria-labelledby="btn-doctor-tab-reminders">
+                        <section class="admin-analytics-panel">
+                            <div class="admin-analytics-hero">
+                                <div>
+                                    <div class="admin-panel-kicker"><i class="fas fa-bell" aria-hidden="true"></i> Lembretes</div>
+                                    <h3>Lembre os pacientes de praticar.</h3>
+                                    <p>Escolha um ou vários dos seus pacientes. O lembrete chega por e-mail e aparece no app do paciente.</p>
+                                </div>
+                            </div>
+                            <form class="admin-analytics-card reminder-form" id="doctor-reminder-form">
+                                <div class="reminder-preview">
+                                    <i class="fas fa-bell" aria-hidden="true"></i>
+                                    <span>O paciente recebe por e-mail e vê ao abrir o app: <strong>“Hora de praticar! (seu nome) lembrou você de praticar seus exercícios no Comunica Fácil.”</strong> E o recado, se você escrever um.</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="doctor-reminder-message">Recado (opcional)</label>
+                                    <textarea id="doctor-reminder-message" rows="3" maxlength="500" placeholder="Ex: Não esqueça do Monte a Frase desta semana!"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <span class="reminder-label">Para quem</span>
+                                    <label class="reminder-all"><input type="checkbox" id="doctor-reminder-select-all"> Todos os meus pacientes</label>
+                                    <div class="reminder-patient-list" id="doctor-reminder-patient-list"></div>
+                                </div>
+                                <div class="reminder-actions">
+                                    <button type="submit" class="btn-primary" id="btn-doctor-reminder-send" disabled>Enviar lembrete</button>
+                                </div>
+                            </form>
+                            <section class="admin-analytics-card">
+                                <h3 class="evolution-section-title">Últimos lembretes enviados</h3>
+                                <div id="doctor-reminder-history"></div>
+                            </section>
                         </section>
                     </section>
 
@@ -2261,6 +2330,19 @@
         </div>
     </div>
 
+    <!-- Modal: Lembrete recebido (paciente, ao abrir o app) -->
+    <div class="modal-overlay" id="patient-reminder-modal" role="dialog" aria-modal="true" aria-labelledby="patient-reminder-title" aria-describedby="patient-reminder-text">
+        <div class="modal-content notify-modal-content">
+            <div class="notify-modal-icon is-reminder" aria-hidden="true"><i class="fas fa-bell"></i></div>
+            <h2 id="patient-reminder-title">Hora de praticar!</h2>
+            <p id="patient-reminder-text"></p>
+            <div id="patient-reminder-messages"></div>
+            <div class="notify-modal-footer">
+                <button type="button" class="btn-primary" id="btn-patient-reminder-ok">Entendi</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Novo conjunto do Monte a Frase -->
     <div class="modal-overlay" id="new-monte-frase-modal" role="dialog" aria-modal="true" aria-labelledby="new-monte-frase-modal-title">
         <div class="modal-content">
@@ -2435,12 +2517,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=45">
+    <link rel="stylesheet" href="style.css?v=46">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=109"></script>
+    <script defer src="app.js?v=110"></script>
 </body>
 
 
