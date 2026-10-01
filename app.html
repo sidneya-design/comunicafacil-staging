@@ -2248,6 +2248,19 @@
         </div>
     </div>
 
+    <!-- Modal: Avisar por e-mail (confirmação, envio e resultado) -->
+    <div class="modal-overlay" id="notify-modal" role="dialog" aria-modal="true" aria-labelledby="notify-modal-title" aria-describedby="notify-modal-text">
+        <div class="modal-content notify-modal-content">
+            <div class="notify-modal-icon" id="notify-modal-icon" aria-hidden="true"><i class="fas fa-envelope"></i></div>
+            <h2 id="notify-modal-title">Avisar por e-mail</h2>
+            <p id="notify-modal-text" role="status" aria-live="polite"></p>
+            <div class="notify-modal-footer">
+                <button type="button" class="btn-secondary" id="btn-notify-cancel">Cancelar</button>
+                <button type="button" class="btn-primary" id="btn-notify-confirm">Enviar aviso</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Novo conjunto do Monte a Frase -->
     <div class="modal-overlay" id="new-monte-frase-modal" role="dialog" aria-modal="true" aria-labelledby="new-monte-frase-modal-title">
         <div class="modal-content">
@@ -2422,12 +2435,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=44">
+    <link rel="stylesheet" href="style.css?v=45">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=108"></script>
+    <script defer src="app.js?v=109"></script>
 </body>
 
 

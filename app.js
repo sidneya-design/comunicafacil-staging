@@ -3595,31 +3595,88 @@ async function toggleExerciseVisibility(ex) {
     loadExerciseCards();
 }
 
+// Janela "Avisar por e-mail" (#notify-modal) no lugar do confirm()/alert()
+// do navegador: a mesma janela pergunta, mostra o envio e depois o resultado.
+// Estados: 'confirm' (Cancelar / Enviar aviso), 'sending' (sem botões),
+// 'success' e 'error' (só OK).
+const NOTIFY_MODAL_ICONS = {
+    confirm: 'fa-envelope', sending: 'fa-spinner fa-spin', success: 'fa-circle-check', error: 'fa-triangle-exclamation'
+};
+let notifyModalResolve = null;
+
+function setNotifyModal(state, title, text) {
+    const modal = document.getElementById('notify-modal');
+    const icon = document.getElementById('notify-modal-icon');
+    icon.className = `notify-modal-icon is-${state}`;
+    icon.innerHTML = `<i class="fas ${NOTIFY_MODAL_ICONS[state]}"></i>`;
+    document.getElementById('notify-modal-title').textContent = title;
+    document.getElementById('notify-modal-text').textContent = text;
+    const cancelBtn = document.getElementById('btn-notify-cancel');
+    const confirmBtn = document.getElementById('btn-notify-confirm');
+    cancelBtn.style.display = state === 'confirm' ? '' : 'none';
+    confirmBtn.style.display = state === 'sending' ? 'none' : '';
+    confirmBtn.textContent = state === 'confirm' ? 'Enviar aviso' : 'OK';
+    modal.dataset.state = state;
+    modal.style.display = 'flex';
+    if (state !== 'sending') setTimeout(() => confirmBtn.focus(), 50);
+}
+
+function closeNotifyModal(confirmed) {
+    const modal = document.getElementById('notify-modal');
+    if (modal.dataset.state === 'sending') return; // não fecha no meio do envio
+    if (modal.dataset.state !== 'confirm' || !confirmed) modal.style.display = 'none';
+    const resolve = notifyModalResolve;
+    notifyModalResolve = null;
+    resolve?.(confirmed);
+}
+
+function askNotifyConfirm(text) {
+    return new Promise(resolve => {
+        notifyModalResolve = resolve;
+        setNotifyModal('confirm', 'Avisar por e-mail', text);
+    });
+}
+
+document.getElementById('btn-notify-confirm')?.addEventListener('click', () => closeNotifyModal(true));
+document.getElementById('btn-notify-cancel')?.addEventListener('click', () => closeNotifyModal(false));
+document.getElementById('notify-modal')?.addEventListener('click', (ev) => {
+    if (ev.target.id === 'notify-modal') closeNotifyModal(false);
+});
+document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && document.getElementById('notify-modal')?.style.display === 'flex') closeNotifyModal(false);
+});
+
 async function sendActivityNotification(title, category = 'Atividade', patient = null) {
     if (!supabaseClient) {
-        alert('O envio de avisos requer conexão com o servidor.');
+        setNotifyModal('error', 'Sem conexão', 'O envio de avisos requer conexão com o servidor.');
         return;
     }
 
     const patientLabel = patient ? (patient.name || patient.email || 'este paciente') : null;
-    const confirmed = patient
-        ? confirm(`Enviar um e-mail para ${patientLabel} avisando que "${title}" está disponível?`)
-        : confirm(`Enviar um e-mail para todos os usuários avisando que "${title}" está disponível?`);
+    const confirmed = await askNotifyConfirm(patient
+        ? `${patientLabel} vai receber um e-mail avisando que “${title}” está disponível.`
+        : `Todos os usuários vão receber um e-mail avisando que “${title}” está disponível.`);
     if (!confirmed) return;
 
+    setNotifyModal('sending', 'Enviando aviso…', 'Só um instante.');
     const { data, error } = await supabaseClient.functions.invoke('notify-users', {
         body: { title, category, patientId: patient ? patient.id : undefined }
     });
 
     if (error) {
         console.error('Erro ao enviar aviso:', error);
-        alert('Não foi possível enviar o aviso. Verifique a configuração do Gmail e tente novamente.');
+        setNotifyModal('error', 'Aviso não enviado', 'Não foi possível enviar o aviso. Verifique a configuração do Gmail e tente novamente.');
         return;
     }
 
-    alert(patient
-        ? (data?.recipientCount ? `Aviso enviado para ${patientLabel}.` : 'Não foi possível encontrar o e-mail deste paciente.')
-        : `Aviso enviado para ${data?.recipientCount ?? 0} usuário(s).`);
+    if (patient && !data?.recipientCount) {
+        setNotifyModal('error', 'Aviso não enviado', `Não encontrei o e-mail de ${patientLabel}.`);
+        return;
+    }
+    const count = data?.recipientCount ?? 0;
+    setNotifyModal('success', 'Aviso enviado', patient
+        ? `${patientLabel} vai receber o e-mail sobre “${title}”.`
+        : `${count} ${count === 1 ? 'usuário vai' : 'usuários vão'} receber o e-mail sobre “${title}”.`);
 }
 
 function createNotifyUsersButton(title, category = 'Atividade', patient = null) {

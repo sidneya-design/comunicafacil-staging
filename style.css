@@ -4736,6 +4736,15 @@ button, .action-btn { touch-action: manipulation; }
 }
 
 /* Evolução do paciente (Monte a Frase) */
+/* Janela "Avisar por e-mail" (setNotifyModal em app.js) */
+.notify-modal-content { max-width: 420px; text-align: center; padding: 28px 26px 24px; }
+.notify-modal-icon { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 50%; font-size: 28px; background: #e3f2fd; color: #1976d2; }
+.notify-modal-icon.is-success { background: #e8f5e9; color: #2e7d32; }
+.notify-modal-icon.is-error { background: #fdecea; color: #c62828; }
+.notify-modal-content h2 { font-size: 1.3rem; margin: 0 0 8px; color: #1f2933; }
+.notify-modal-content p { margin: 0; color: #52514e; line-height: 1.5; font-size: 0.98rem; }
+.notify-modal-footer { display: flex; justify-content: center; gap: 10px; margin-top: 22px; }
+.notify-modal-footer button { min-width: 120px; border-radius: 10px; }
 .release-kind-tag { display: inline-block; margin-right: 8px; padding: 2px 8px; border-radius: 999px; background: #e3f2fd; color: #0d47a1; font-size: 0.75rem; font-weight: 600; vertical-align: middle; }
 .evolution-deck-filter { align-self: flex-start; margin-bottom: 1rem; padding: 8px 12px; border: 1px solid #d5d9de; border-radius: 8px; background: #fff; font: inherit; color: #1f2933; cursor: pointer; }
 .evolution-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 1rem; }
