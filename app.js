@@ -13417,12 +13417,31 @@ document.getElementById('btn-user-profile')?.addEventListener('click', () => {
     if (!userBarSession) return;
     document.getElementById('profile-name').textContent = userDisplayName(userBarSession);
     document.getElementById('profile-email').textContent = userBarSession.user.email || '';
-    document.getElementById('profile-password-form').reset();
     setProfileStatus('profile-photo-status', '');
-    setProfileStatus('profile-password-status', '');
+    setProfileStatus('profile-password-done', '');
+    showProfilePasswordForm(false);
     refreshUserAvatar();
     profileModal.style.display = 'flex';
 });
+
+// Foto e senha são independentes: a foto salva sozinha ao ser escolhida; a
+// senha só aparece ao clicar em "Mudar senha" (antes, os campos de senha
+// sempre à vista davam a impressão de que trocar a foto exigia trocar a senha).
+function showProfilePasswordForm(show) {
+    const form = document.getElementById('profile-password-form');
+    const toggle = document.getElementById('btn-profile-password-toggle');
+    form.reset();
+    setProfileStatus('profile-password-status', '');
+    form.hidden = !show;
+    toggle.hidden = show;
+    toggle.setAttribute('aria-expanded', String(show));
+    if (show) {
+        setProfileStatus('profile-password-done', '');
+        setTimeout(() => document.getElementById('profile-new-password').focus(), 50);
+    }
+}
+document.getElementById('btn-profile-password-toggle')?.addEventListener('click', () => showProfilePasswordForm(true));
+document.getElementById('btn-profile-password-cancel')?.addEventListener('click', () => showProfilePasswordForm(false));
 document.getElementById('btn-close-profile')?.addEventListener('click', () => { profileModal.style.display = 'none'; });
 
 document.getElementById('btn-profile-photo-change')?.addEventListener('click', () => document.getElementById('profile-photo-input').click());
@@ -13472,8 +13491,8 @@ document.getElementById('profile-password-form')?.addEventListener('submit', asy
         setProfileStatus('profile-password-status', 'Não consegui mudar a senha: ' + error.message, true);
         return;
     }
-    ev.target.reset();
-    setProfileStatus('profile-password-status', 'Senha alterada! Use a nova senha na próxima vez que entrar.');
+    showProfilePasswordForm(false);
+    setProfileStatus('profile-password-done', 'Senha alterada! Use a nova senha na próxima vez que entrar.');
 });
 
 // =============================================

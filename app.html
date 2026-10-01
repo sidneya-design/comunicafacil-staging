@@ -2355,18 +2355,24 @@
                 </div>
                 <input type="file" id="profile-photo-input" accept="image/*" hidden>
             </section>
-            <form class="profile-password" id="profile-password-form">
+            <!-- Senha separada da foto: só aparece ao clicar em "Mudar senha". -->
+            <button type="button" class="btn-secondary profile-password-toggle" id="btn-profile-password-toggle" aria-expanded="false" aria-controls="profile-password-form">
+                <i class="fas fa-key" aria-hidden="true"></i> Mudar senha
+            </button>
+            <p class="profile-status" id="profile-password-done" role="status" aria-live="polite"></p>
+            <form class="profile-password" id="profile-password-form" hidden novalidate>
                 <h3>Mudar senha</h3>
                 <div class="form-group">
                     <label for="profile-new-password">Nova senha</label>
-                    <input type="password" id="profile-new-password" minlength="6" autocomplete="new-password" required placeholder="Mínimo de 6 caracteres">
+                    <input type="password" id="profile-new-password" minlength="6" autocomplete="new-password" placeholder="Mínimo de 6 caracteres">
                 </div>
                 <div class="form-group">
                     <label for="profile-confirm-password">Repita a nova senha</label>
-                    <input type="password" id="profile-confirm-password" minlength="6" autocomplete="new-password" required>
+                    <input type="password" id="profile-confirm-password" minlength="6" autocomplete="new-password">
                 </div>
                 <p class="profile-status" id="profile-password-status" role="status" aria-live="polite"></p>
                 <div class="modal-footer">
+                    <button type="button" class="btn-secondary" id="btn-profile-password-cancel">Cancelar</button>
                     <button type="submit" class="btn-primary" id="btn-profile-password-save">Salvar nova senha</button>
                 </div>
             </form>
@@ -2573,12 +2579,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=49">
+    <link rel="stylesheet" href="style.css?v=50">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=112"></script>
+    <script defer src="app.js?v=113"></script>
 </body>
 
 
