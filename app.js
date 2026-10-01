@@ -13351,8 +13351,12 @@ function userDisplayName(session) {
 function updateUserBarVisibility() {
     const bar = document.getElementById('user-bar');
     if (!bar) return;
+    const wasHidden = bar.hidden;
     bar.hidden = !userBarSession || !document.getElementById('view-core')?.classList.contains('active');
     if (bar.hidden) closeUserMenu();
+    // Voltou aos Essenciais: busca a foto de novo — ela pode ter sido trocada
+    // por outra tela (ex.: a lista de pacientes) enquanto a faixa estava fora.
+    else if (wasHidden) refreshUserAvatar();
 }
 
 async function refreshUserAvatar() {
@@ -14531,6 +14535,7 @@ patientAvatarInput.addEventListener('change', async () => {
         await saveAvatar(userId, file);
         showDoctorPatientsFeedback('Foto do paciente atualizada.');
         loadPatientAvatarThumbs(doctorPatientsCache.map(p => p.userId));
+        if (userId === userBarSession?.user?.id) refreshUserAvatar();
     } catch (err) {
         showDoctorPatientsFeedback('Não consegui salvar a foto: ' + (err.message || err), true);
     }
