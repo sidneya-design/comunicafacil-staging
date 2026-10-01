@@ -13413,12 +13413,57 @@ document.getElementById('btn-user-profile')?.addEventListener('click', () => {
     closeUserMenu();
     if (!userBarSession) return;
     document.getElementById('profile-name').textContent = userDisplayName(userBarSession) || 'Nome não cadastrado';
+    showProfileNameForm(false);
     document.getElementById('profile-email').textContent = userBarSession.user.email || '';
     setProfileStatus('profile-photo-status', '');
     setProfileStatus('profile-password-done', '');
     showProfilePasswordForm(false);
     refreshUserAvatar();
     profileModal.style.display = 'flex';
+});
+
+// Nome editável no Meu perfil (o e-mail não). Grava no nome da conta
+// (user_metadata.full_name) e, se for paciente, também em patients.name —
+// é esse que o médico vê em Meus Pacientes —, pela função
+// set_my_patient_name, que só deixa mudar o nome (migration 20261006000000).
+function showProfileNameForm(show) {
+    document.getElementById('profile-name-view').hidden = show;
+    document.getElementById('profile-name-form').hidden = !show;
+    if (show) {
+        const input = document.getElementById('profile-name-input');
+        input.value = userDisplayName(userBarSession);
+        setTimeout(() => input.focus(), 50);
+    }
+}
+document.getElementById('btn-profile-name-edit')?.addEventListener('click', () => showProfileNameForm(true));
+document.getElementById('btn-profile-name-cancel')?.addEventListener('click', () => showProfileNameForm(false));
+document.getElementById('profile-name-form')?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const name = document.getElementById('profile-name-input').value.trim().replace(/\s+/g, ' ');
+    if (!name) {
+        setProfileStatus('profile-photo-status', 'Escreva o seu nome.', true);
+        return;
+    }
+    const saveBtn = document.getElementById('btn-profile-name-save');
+    saveBtn.disabled = true;
+    try {
+        if (currentPatientId) {
+            const { error: patientError } = await supabaseClient.rpc('set_my_patient_name', { new_name: name });
+            if (patientError) throw patientError;
+            currentPatientName = name;
+        }
+        const { data, error } = await supabaseClient.auth.updateUser({ data: { full_name: name } });
+        if (error) throw error;
+        if (data?.user) userBarSession.user = data.user;
+        document.getElementById('profile-name').textContent = name;
+        initUserBar(userBarSession);
+        showProfileNameForm(false);
+        setProfileStatus('profile-photo-status', 'Nome atualizado!');
+    } catch (err) {
+        setProfileStatus('profile-photo-status', 'Não consegui salvar o nome: ' + (err.message || err), true);
+    } finally {
+        saveBtn.disabled = false;
+    }
 });
 
 // Foto e senha são independentes: a foto salva sozinha ao ser escolhida; a

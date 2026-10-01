@@ -121,6 +121,14 @@ body {
 .profile-identity { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .profile-identity strong { font-size: 1.1rem; color: #1f2933; }
 .profile-identity > span { color: #6b7280; font-size: 0.92rem; overflow-wrap: anywhere; }
+.profile-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.profile-name-row[hidden], .profile-name-form[hidden] { display: none; }
+.profile-name-edit { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 8px; background: #f1f5f9; color: #52606d; font-size: 13px; cursor: pointer; }
+.profile-name-edit:hover { background: #e2e8f0; color: #1f2933; }
+.profile-name-form { display: flex; flex-direction: column; gap: 6px; }
+.profile-name-form input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; font: inherit; font-size: 15px; }
+.profile-name-actions { display: flex; gap: 6px; }
+.profile-name-actions button { padding: 6px 12px; font-size: 14px; border-radius: 8px; }
 .profile-photo-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .profile-photo-actions button { padding: 8px 14px; font-size: 14px; border-radius: 8px; }
 .profile-password-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 8px; font-size: 15px; }
