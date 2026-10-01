@@ -93,6 +93,21 @@
         </nav>
 
         <div class="main-content">
+            <!-- "Olá, nome" + foto (só na tela Essenciais, com a pessoa logada) -->
+            <div class="user-bar" id="user-bar" hidden>
+                <p class="user-greeting">Olá, <strong id="user-greeting-name"></strong></p>
+                <div class="user-avatar-wrap">
+                    <button type="button" class="user-avatar-btn" id="btn-user-avatar" aria-haspopup="menu" aria-expanded="false" aria-label="Sua foto e opções">
+                        <img id="user-avatar-img" alt="" hidden>
+                        <i class="fas fa-user" id="user-avatar-placeholder" aria-hidden="true"></i>
+                    </button>
+                    <div class="user-menu" id="user-menu" role="menu" hidden>
+                        <button type="button" role="menuitem" id="btn-user-profile"><i class="fas fa-id-card" aria-hidden="true"></i> Meu perfil</button>
+                        <button type="button" role="menuitem" id="btn-user-logout"><i class="fas fa-right-from-bracket" aria-hidden="true"></i> Sair</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Barra de Mensagem (Fixa no topo) -->
             <header class="message-bar">
                 <div class="message-display" id="message-display" role="region" aria-live="polite" aria-label="Frase montada"></div>
@@ -2317,6 +2332,47 @@
         </div>
     </div>
 
+    <!-- Modal: Meu perfil (foto e senha da pessoa logada) -->
+    <div class="modal-overlay" id="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title">
+        <div class="modal-content profile-modal-content">
+            <div class="modal-header">
+                <h2 id="profile-modal-title">Meu perfil</h2>
+                <button class="close-modal-btn" id="btn-close-profile" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
+            </div>
+            <section class="profile-photo-section">
+                <div class="profile-photo" id="profile-photo">
+                    <img id="profile-photo-img" alt="Sua foto" hidden>
+                    <i class="fas fa-user" id="profile-photo-placeholder" aria-hidden="true"></i>
+                </div>
+                <div class="profile-identity">
+                    <strong id="profile-name"></strong>
+                    <span id="profile-email"></span>
+                    <div class="profile-photo-actions">
+                        <button type="button" class="btn-primary" id="btn-profile-photo-change"><i class="fas fa-camera" aria-hidden="true"></i> Trocar foto</button>
+                        <button type="button" class="btn-secondary" id="btn-profile-photo-remove" hidden>Remover foto</button>
+                    </div>
+                    <p class="profile-status" id="profile-photo-status" role="status" aria-live="polite"></p>
+                </div>
+                <input type="file" id="profile-photo-input" accept="image/*" hidden>
+            </section>
+            <form class="profile-password" id="profile-password-form">
+                <h3>Mudar senha</h3>
+                <div class="form-group">
+                    <label for="profile-new-password">Nova senha</label>
+                    <input type="password" id="profile-new-password" minlength="6" autocomplete="new-password" required placeholder="Mínimo de 6 caracteres">
+                </div>
+                <div class="form-group">
+                    <label for="profile-confirm-password">Repita a nova senha</label>
+                    <input type="password" id="profile-confirm-password" minlength="6" autocomplete="new-password" required>
+                </div>
+                <p class="profile-status" id="profile-password-status" role="status" aria-live="polite"></p>
+                <div class="modal-footer">
+                    <button type="submit" class="btn-primary" id="btn-profile-password-save">Salvar nova senha</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Modal: Avisar por e-mail (confirmação, envio e resultado) -->
     <div class="modal-overlay" id="notify-modal" role="dialog" aria-modal="true" aria-labelledby="notify-modal-title" aria-describedby="notify-modal-text">
         <div class="modal-content notify-modal-content">
@@ -2517,12 +2573,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=46">
+    <link rel="stylesheet" href="style.css?v=47">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=110"></script>
+    <script defer src="app.js?v=111"></script>
 </body>
 
 

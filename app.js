@@ -13179,11 +13179,13 @@ if (supabaseClient) {
 
             if (role === 'patient') {
                 const { data: patientRow } = await supabaseClient
-                    .from('patients').select('id, doctor_user_id').eq('user_id', userId).maybeSingle();
+                    .from('patients').select('id, doctor_user_id, name').eq('user_id', userId).maybeSingle();
                 currentPatientId = patientRow?.id || null;
                 currentPatientDoctorUserId = patientRow?.doctor_user_id || null;
+                currentPatientName = patientRow?.name || null;
                 showPatientReminders();
             }
+            initUserBar(data.session);
             startUsageSession({
                 id: userId,
                 email: data.session.user.email || 'sem e-mail',
@@ -13258,6 +13260,220 @@ document.getElementById('btn-login-logout')?.addEventListener('click', async () 
         if (supabaseClient) await supabaseClient.auth.signOut();
         window.location.href = 'index.html';
     }
+});
+
+// =============================================
+// FOTO DE PERFIL E "MEU PERFIL"
+// Faixa "Olá, nome" com a foto no topo da tela Essenciais (só ela, e só com
+// alguém logado). Clicar na foto abre o menu: "Meu perfil" (trocar/remover a
+// foto, mudar a senha) e "Sair". O médico também põe a foto dos pacientes em
+// "Meus Pacientes" (clicando na foto ao lado do nome).
+// As fotos ficam no bucket privado "avatars" ("<user_id>/<arquivo>.jpg",
+// reduzidas para 256x256) e são abertas por URL assinada; user_avatars diz
+// qual é a foto atual de cada pessoa. Ver migration 20261005000000.
+// =============================================
+const AVATAR_BUCKET = 'avatars';
+const AVATAR_SIZE = 256;
+let currentPatientName = null;
+let userBarSession = null;
+let currentUserAvatarUrl = null;
+
+// Recorta no centro em quadrado e reduz — foto de celular tem vários MB.
+function resizeImageToJpeg(file, size = AVATAR_SIZE) {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            const side = Math.min(img.naturalWidth, img.naturalHeight);
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            canvas.getContext('2d').drawImage(img,
+                (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+            URL.revokeObjectURL(url);
+            canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Não consegui ler a imagem.')), 'image/jpeg', 0.85);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Esse arquivo não é uma imagem válida.')); };
+        img.src = url;
+    });
+}
+
+// user_id → URL assinada (1 h) da foto atual, só para quem tem foto.
+async function getAvatarUrls(userIds) {
+    const urls = new Map();
+    const ids = [...new Set(userIds.filter(Boolean))];
+    if (!supabaseClient || !ids.length) return urls;
+    const { data: rows } = await supabaseClient.from('user_avatars').select('user_id, photo_path').in('user_id', ids);
+    if (!rows?.length) return urls;
+    const { data: signed } = await supabaseClient.storage.from(AVATAR_BUCKET).createSignedUrls(rows.map(r => r.photo_path), 3600);
+    rows.forEach(r => {
+        const match = (signed || []).find(s => s.path === r.photo_path && s.signedUrl);
+        if (match) urls.set(r.user_id, match.signedUrl);
+    });
+    return urls;
+}
+
+// Grava a foto nova e só depois apaga a antiga (nome novo a cada troca, pra
+// nenhum cache mostrar a foto velha).
+async function saveAvatar(userId, file) {
+    const blob = await resizeImageToJpeg(file);
+    const path = `${userId}/${Date.now()}.jpg`;
+    const { error: uploadError } = await supabaseClient.storage.from(AVATAR_BUCKET).upload(path, blob, { contentType: 'image/jpeg' });
+    if (uploadError) throw uploadError;
+    const { data: previous } = await supabaseClient.from('user_avatars').select('photo_path').eq('user_id', userId).maybeSingle();
+    const { error: rowError } = await supabaseClient.from('user_avatars')
+        .upsert({ user_id: userId, photo_path: path, updated_at: new Date().toISOString() });
+    if (rowError) throw rowError;
+    if (previous?.photo_path) await supabaseClient.storage.from(AVATAR_BUCKET).remove([previous.photo_path]);
+}
+
+async function removeAvatar(userId) {
+    const { data: previous } = await supabaseClient.from('user_avatars').select('photo_path').eq('user_id', userId).maybeSingle();
+    const { error } = await supabaseClient.from('user_avatars').delete().eq('user_id', userId);
+    if (error) throw error;
+    if (previous?.photo_path) await supabaseClient.storage.from(AVATAR_BUCKET).remove([previous.photo_path]);
+}
+
+function showAvatarIn(img, placeholder, url) {
+    img.hidden = !url;
+    placeholder.hidden = Boolean(url);
+    if (url) img.src = url;
+    else img.removeAttribute('src');
+}
+
+function userDisplayName(session) {
+    const meta = session?.user?.user_metadata || {};
+    const fullName = (currentPatientName || meta.full_name || meta.name || '').trim();
+    if (fullName) return fullName;
+    return (session?.user?.email || '').split('@')[0];
+}
+
+// Nome curto pro "Olá": primeiro nome (o completo fica no Meu perfil).
+function userFirstName(session) {
+    return userDisplayName(session).split(/\s+/)[0] || 'você';
+}
+
+function updateUserBarVisibility() {
+    const bar = document.getElementById('user-bar');
+    if (!bar) return;
+    bar.hidden = !userBarSession || !document.getElementById('view-core')?.classList.contains('active');
+    if (bar.hidden) closeUserMenu();
+}
+
+async function refreshUserAvatar() {
+    if (!userBarSession) return;
+    const urls = await getAvatarUrls([userBarSession.user.id]);
+    currentUserAvatarUrl = urls.get(userBarSession.user.id) || null;
+    showAvatarIn(document.getElementById('user-avatar-img'), document.getElementById('user-avatar-placeholder'), currentUserAvatarUrl);
+    showAvatarIn(document.getElementById('profile-photo-img'), document.getElementById('profile-photo-placeholder'), currentUserAvatarUrl);
+    document.getElementById('btn-profile-photo-remove').hidden = !currentUserAvatarUrl;
+}
+
+function initUserBar(session) {
+    userBarSession = session || null;
+    if (!userBarSession) return;
+    document.getElementById('user-greeting-name').textContent = userFirstName(userBarSession);
+    updateUserBarVisibility();
+    refreshUserAvatar();
+}
+
+// A faixa acompanha a tela Essenciais, troque-se de tela por onde for.
+const coreViewForUserBar = document.getElementById('view-core');
+if (coreViewForUserBar) new MutationObserver(updateUserBarVisibility).observe(coreViewForUserBar, { attributes: true, attributeFilter: ['class'] });
+
+function closeUserMenu() {
+    const menu = document.getElementById('user-menu');
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    document.getElementById('btn-user-avatar').setAttribute('aria-expanded', 'false');
+}
+
+document.getElementById('btn-user-avatar')?.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const menu = document.getElementById('user-menu');
+    menu.hidden = !menu.hidden;
+    ev.currentTarget.setAttribute('aria-expanded', String(!menu.hidden));
+    if (!menu.hidden) menu.querySelector('button')?.focus();
+});
+document.addEventListener('click', (ev) => { if (!ev.target.closest('.user-avatar-wrap')) closeUserMenu(); });
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeUserMenu(); });
+
+// Sair pelo menu: a pessoa já escolheu "Sair" num menu, sem segunda pergunta.
+document.getElementById('btn-user-logout')?.addEventListener('click', async () => {
+    closeUsageSession('logout');
+    if (supabaseClient) await supabaseClient.auth.signOut();
+    window.location.href = 'index.html';
+});
+
+const profileModal = document.getElementById('profile-modal');
+function setProfileStatus(id, text, isError = false) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.classList.toggle('is-error', isError);
+}
+
+document.getElementById('btn-user-profile')?.addEventListener('click', () => {
+    closeUserMenu();
+    if (!userBarSession) return;
+    document.getElementById('profile-name').textContent = userDisplayName(userBarSession);
+    document.getElementById('profile-email').textContent = userBarSession.user.email || '';
+    document.getElementById('profile-password-form').reset();
+    setProfileStatus('profile-photo-status', '');
+    setProfileStatus('profile-password-status', '');
+    refreshUserAvatar();
+    profileModal.style.display = 'flex';
+});
+document.getElementById('btn-close-profile')?.addEventListener('click', () => { profileModal.style.display = 'none'; });
+
+document.getElementById('btn-profile-photo-change')?.addEventListener('click', () => document.getElementById('profile-photo-input').click());
+document.getElementById('profile-photo-input')?.addEventListener('change', async (ev) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = '';
+    if (!file || !userBarSession) return;
+    setProfileStatus('profile-photo-status', 'Enviando a foto…');
+    try {
+        await saveAvatar(userBarSession.user.id, file);
+        await refreshUserAvatar();
+        setProfileStatus('profile-photo-status', 'Foto atualizada!');
+    } catch (err) {
+        setProfileStatus('profile-photo-status', 'Não consegui salvar a foto: ' + (err.message || err), true);
+    }
+});
+document.getElementById('btn-profile-photo-remove')?.addEventListener('click', async () => {
+    if (!userBarSession) return;
+    setProfileStatus('profile-photo-status', 'Removendo…');
+    try {
+        await removeAvatar(userBarSession.user.id);
+        await refreshUserAvatar();
+        setProfileStatus('profile-photo-status', 'Foto removida.');
+    } catch (err) {
+        setProfileStatus('profile-photo-status', 'Não consegui remover a foto: ' + (err.message || err), true);
+    }
+});
+
+document.getElementById('profile-password-form')?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const password = document.getElementById('profile-new-password').value;
+    const confirmation = document.getElementById('profile-confirm-password').value;
+    if (password.length < 6) {
+        setProfileStatus('profile-password-status', 'A senha precisa ter pelo menos 6 caracteres.', true);
+        return;
+    }
+    if (password !== confirmation) {
+        setProfileStatus('profile-password-status', 'As duas senhas não são iguais.', true);
+        return;
+    }
+    const saveBtn = document.getElementById('btn-profile-password-save');
+    saveBtn.disabled = true;
+    setProfileStatus('profile-password-status', 'Salvando…');
+    const { error } = await supabaseClient.auth.updateUser({ password });
+    saveBtn.disabled = false;
+    if (error) {
+        setProfileStatus('profile-password-status', 'Não consegui mudar a senha: ' + error.message, true);
+        return;
+    }
+    ev.target.reset();
+    setProfileStatus('profile-password-status', 'Senha alterada! Use a nova senha na próxima vez que entrar.');
 });
 
 // =============================================
@@ -14061,7 +14277,22 @@ async function loadDoctorPatients() {
             const tr = document.createElement('tr');
 
             const tdName = document.createElement('td');
-            tdName.textContent = p.name || '-';
+            // Foto do paciente ao lado do nome: clicar troca (o médico pode,
+            // ver can_manage_avatar). As imagens chegam depois, em lote.
+            const nameWrap = document.createElement('span');
+            nameWrap.className = 'patient-name-cell';
+            const avatarBtn = document.createElement('button');
+            avatarBtn.type = 'button';
+            avatarBtn.className = 'patient-avatar-btn';
+            avatarBtn.dataset.userId = p.userId;
+            avatarBtn.title = 'Trocar a foto deste paciente';
+            avatarBtn.setAttribute('aria-label', `Trocar a foto de ${p.name || p.email}`);
+            avatarBtn.innerHTML = '<img alt="" hidden><i class="fas fa-user" aria-hidden="true"></i>';
+            avatarBtn.addEventListener('click', () => pickPatientAvatar(p.userId));
+            const nameText = document.createElement('span');
+            nameText.textContent = p.name || '-';
+            nameWrap.append(avatarBtn, nameText);
+            tdName.appendChild(nameWrap);
 
             const tdEmail = document.createElement('td');
             tdEmail.textContent = p.email || '-';
@@ -14204,10 +14435,45 @@ async function loadDoctorPatients() {
             tr.append(tdName, tdEmail, tdStatus, tdCreated, tdLastSignIn, tdActions);
             tbody.appendChild(tr);
         });
+        loadPatientAvatarThumbs(patients.map(p => p.userId));
     } catch (err) {
         tbody.innerHTML = `<tr><td colspan="6">Erro ao carregar pacientes: ${err.message}</td></tr>`;
     }
 }
+
+async function loadPatientAvatarThumbs(userIds) {
+    const urls = await getAvatarUrls(userIds);
+    document.querySelectorAll('#doctor-patients-tbody .patient-avatar-btn').forEach(btn => {
+        showAvatarIn(btn.querySelector('img'), btn.querySelector('i'), urls.get(btn.dataset.userId) || null);
+    });
+}
+
+// Um seletor de arquivo só, reaproveitado por todas as linhas.
+let patientAvatarTarget = null;
+const patientAvatarInput = document.createElement('input');
+patientAvatarInput.type = 'file';
+patientAvatarInput.accept = 'image/*';
+patientAvatarInput.hidden = true;
+document.body.appendChild(patientAvatarInput);
+
+function pickPatientAvatar(userId) {
+    patientAvatarTarget = userId;
+    patientAvatarInput.click();
+}
+
+patientAvatarInput.addEventListener('change', async () => {
+    const file = patientAvatarInput.files?.[0];
+    patientAvatarInput.value = '';
+    if (!file || !patientAvatarTarget) return;
+    const userId = patientAvatarTarget;
+    try {
+        await saveAvatar(userId, file);
+        showDoctorPatientsFeedback('Foto do paciente atualizada.');
+        loadPatientAvatarThumbs(doctorPatientsCache.map(p => p.userId));
+    } catch (err) {
+        showDoctorPatientsFeedback('Não consegui salvar a foto: ' + (err.message || err), true);
+    }
+});
 
 const newPatientModal = document.getElementById('new-patient-modal');
 const newPatientForm = document.getElementById('new-patient-form');
