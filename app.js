@@ -3886,6 +3886,10 @@ function renderExerciseCards(exercisesArray) {
             // troca por um ícone de parágrafo, igual ao padrão de ícone dos
             // outros tipos sem imagem própria.
             imgContainer.innerHTML = '<i class="fas fa-align-left word-btn-icon" aria-hidden="true"></i>';
+        } else if (ex.gameKind === 'monte-frase') {
+            // Monte a Frase: a 1ª frase como capa saía cortada e entregava a
+            // resposta — usa o ícone do exercício.
+            imgContainer.innerHTML = '<i class="fas fa-chalkboard word-btn-icon" aria-hidden="true"></i>';
         } else if (firstItem && firstItem.imageBlob instanceof Blob) {
             imgContainer.innerHTML = `<img src="${URL.createObjectURL(firstItem.imageBlob)}" class="word-btn-img" alt="" />`;
         } else if (firstItem && firstItem.image_url) {
