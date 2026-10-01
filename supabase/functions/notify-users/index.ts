@@ -84,8 +84,9 @@ async function sendReminders(
   );
   if (insertError) throw insertError;
 
+  // Sem Gmail configurado (ex.: staging), o lembrete fica só no app.
   const emails: string[] = [];
-  for (const p of activePatients) {
+  if (GMAIL_SMTP_USER && GMAIL_APP_PASSWORD) for (const p of activePatients) {
     const { data: user } = await admin.auth.admin.getUserById(p.user_id);
     if (user?.user?.email && !user.user.banned_until) emails.push(user.user.email);
   }
@@ -117,10 +118,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    if (!GMAIL_SMTP_USER || !GMAIL_APP_PASSWORD) {
-      return json({ error: "O Gmail ainda não foi configurado no servidor." }, 503);
-    }
-
     const authHeader = req.headers.get("Authorization") ?? "";
     const token = authHeader.replace(/^Bearer\s+/i, "");
     if (!token) return json({ error: "Não autenticado." }, 401);
@@ -142,6 +139,11 @@ Deno.serve(async (req) => {
     const body = await req.json();
     if (body?.kind === "reminder") {
       return await sendReminders(admin, callerData.user, callerRole?.role ?? "", body);
+    }
+    // O aviso de atividade é só e-mail; o lembrete (acima) funciona no app
+    // mesmo sem o Gmail configurado.
+    if (!GMAIL_SMTP_USER || !GMAIL_APP_PASSWORD) {
+      return json({ error: "O Gmail ainda não foi configurado no servidor." }, 503);
     }
     const title = String(body?.title ?? "").trim().slice(0, 160);
     const category = String(body?.category ?? "Atividade").trim().slice(0, 40);
