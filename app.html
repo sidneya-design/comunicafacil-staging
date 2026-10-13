@@ -450,10 +450,8 @@
                         <!-- Espelho: lê a frase se vendo na câmera, grava e assiste. O vídeo fica só no navegador. -->
                         <div id="game-mirror-container" class="mirror-game" style="display:none;">
                             <div class="memory-header mirror-header">
+                                <strong class="mirror-deck-title" id="mirror-deck-title">Espelho</strong>
                                 <span class="mirror-progress" id="mirror-progress">0 / 0</span>
-                                <button type="button" class="edit-mode-btn" id="btn-manage-mirror" style="display:none; margin-left:auto;">
-                                    <i class="fas fa-sliders" aria-hidden="true"></i> Gerenciar frases
-                                </button>
                             </div>
                             <div class="mirror-layout">
                                 <button type="button" class="mirror-nav-arrow" id="btn-mirror-prev" aria-label="Frase anterior"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
@@ -1494,18 +1492,6 @@
                     </div>
                 </div>
 
-                <!-- Modal: Frases do Espelho liberadas por Paciente -->
-                <div class="modal-overlay" id="patient-mirror-modal" role="dialog" aria-modal="true" aria-labelledby="patient-mirror-modal-title">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h2 id="patient-mirror-modal-title">Frases do Espelho liberadas</h2>
-                            <button class="close-modal-btn" id="btn-close-patient-mirror" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
-                        </div>
-                        <p class="media-hint" id="patient-mirror-subtitle" style="margin-bottom: 1rem;"></p>
-                        <div id="patient-mirror-list" style="display:flex; flex-direction:column; gap:10px;"></div>
-                    </div>
-                </div>
-
                 <!-- Modal: Livros do banco do médico liberados por Paciente -->
                 <div class="modal-overlay" id="patient-books-modal" role="dialog" aria-modal="true" aria-labelledby="patient-books-modal-title">
                     <div class="modal-content">
@@ -1672,53 +1658,6 @@
         </div>
     </div>
 
-    <!-- Modal: banco de frases do Espelho -->
-    <div class="modal-overlay" id="mirror-phrases-modal" role="dialog" aria-modal="true" aria-labelledby="mirror-phrases-modal-title">
-        <div class="modal-content mirror-phrases-modal-content">
-            <div class="modal-header">
-                <h2 id="mirror-phrases-modal-title">Frases do Espelho</h2>
-                <button class="close-modal-btn" id="btn-close-mirror-phrases" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
-            </div>
-            <form id="mirror-phrase-form">
-                <div class="form-group">
-                    <label for="mirror-phrase-input" id="mirror-phrase-form-label">Nova frase</label>
-                    <input type="text" id="mirror-phrase-input" required placeholder="Ex: Eu *gos*to de tra*ba*lhar">
-                    <small class="mirror-form-hint">Coloque entre *asteriscos* a sílaba que deve ficar em destaque.</small>
-                </div>
-                <div class="form-group">
-                    <label for="mirror-phrase-size">Tamanho do texto (px)</label>
-                    <div class="mirror-size-row">
-                        <button type="button" class="mirror-size-step" id="btn-mirror-size-down" aria-label="Diminuir texto">A−</button>
-                        <input type="number" id="mirror-phrase-size" min="16" max="200" step="2" placeholder="Automático">
-                        <button type="button" class="mirror-size-step" id="btn-mirror-size-up" aria-label="Aumentar texto">A+</button>
-                        <button type="button" class="mirror-size-auto" id="btn-mirror-size-auto">Automático</button>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="mirror-text-color-custom">Cor do texto</label>
-                    <div class="card-color-picker" id="mirror-text-color-picker">
-                        <span class="card-color-custom-wrap"><input type="color" id="mirror-text-color-custom" class="card-color-custom" title="Outra cor" value="#FFFFFF"></span>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="mirror-highlight-color-custom">Cor do destaque (sílabas entre *asteriscos*)</label>
-                    <div class="card-color-picker" id="mirror-highlight-color-picker">
-                        <span class="card-color-custom-wrap"><input type="color" id="mirror-highlight-color-custom" class="card-color-custom" title="Outra cor" value="#FFFFFF"></span>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Prévia</label>
-                    <div class="mirror-phrase-preview" id="mirror-phrase-preview"></div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn-secondary" id="btn-cancel-mirror-phrase-edit" style="display:none;">Cancelar edição</button>
-                    <button type="submit" class="btn-primary" id="btn-save-mirror-phrase">Adicionar frase</button>
-                </div>
-            </form>
-            <ul class="mirror-phrases-list" id="mirror-phrases-list"></ul>
-        </div>
-    </div>
-
     <!-- Modal de Upload de Áudio -->
     <div class="modal-overlay" id="audio-upload-modal" role="dialog" aria-modal="true" aria-labelledby="audio-upload-modal-title">
         <div class="modal-content">
@@ -1774,6 +1713,11 @@
                     <i class="fas fa-spell-check" aria-hidden="true"></i>
                     <strong>Exercício de Sílabas</strong>
                     <span>Palavra escrita, dividida em sílabas, com áudio.</span>
+                </button>
+                <button type="button" class="exercise-type-option mirror" id="btn-create-mirror-exercise">
+                    <i class="fas fa-video" aria-hidden="true"></i>
+                    <strong>Espelho</strong>
+                    <span>Frases pra ler se vendo na câmera, gravar e assistir.</span>
                 </button>
                 <button type="button" class="exercise-type-option audio-real" id="btn-create-audio-exercise">
                     <i class="fas fa-microphone" aria-hidden="true"></i>
@@ -1979,6 +1923,72 @@
 
                 <div class="modal-footer">
                     <button type="button" class="btn-secondary" id="btn-cancel-syllables-exercise">Cancelar</button>
+                    <button type="submit" class="btn-primary"
+                        style="background: linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%);">Salvar Exercício</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Exercício Espelho: mesmo molde do de Sílabas, com frases no lugar de palavras.
+         Tamanho/cor/fonte valem pro exercício todo; negrito/cor por trecho no editor da frase. -->
+    <div class="modal-overlay" id="mirror-exercise-modal" role="dialog" aria-modal="true" aria-labelledby="mirror-exercise-modal-title">
+        <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2 id="mirror-exercise-modal-title">Novo Exercício (Espelho)</h2>
+                <button class="close-modal-btn" id="btn-close-mirror-exercise" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
+            </div>
+            <form id="mirror-exercise-form">
+                <div class="form-group">
+                    <label for="mirror-exercise-title">Nome do Exercício (Ex: Frases do trabalho)</label>
+                    <input type="text" id="mirror-exercise-title" required placeholder="Ex: Saudações">
+                </div>
+                <div class="form-group">
+                    <label for="mirror-exercise-color-custom">Cor do Card</label>
+                    <div class="card-color-picker" id="mirror-exercise-color-picker">
+                        <span class="card-color-custom-wrap"><input type="color" id="mirror-exercise-color-custom" class="card-color-custom" title="Outra cor" value="#FFFFFF"></span><button type="button" class="card-color-save-btn" id="mirror-exercise-color-save" title="Salvar esta cor para usar em outros cards" aria-label="Salvar cor customizada"><i class="fas fa-bookmark" aria-hidden="true"></i></button>
+                    </div>
+                    <input type="hidden" id="mirror-exercise-color" value="pink">
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                        <label for="mirror-text-size">Tamanho do Texto (px)</label>
+                        <input type="number" id="mirror-text-size" value="56" min="20" max="200"
+                            style="width: 100%; height: 40px; box-sizing: border-box; padding: 0 10px; border: 1px solid #ddd; border-radius: 8px;">
+                    </div>
+                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                        <label for="mirror-text-color">Cor do Texto</label>
+                        <input type="color" id="mirror-text-color" value="#1f1f1f"
+                            style="width: 100%; height: 40px; cursor: pointer; border: 1px solid #ddd; border-radius: 8px;">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="mirror-font">Fonte</label>
+                    <select id="mirror-font" style="width: 100%; height: 40px; border: 1px solid #ddd; border-radius: 8px; padding: 0 10px; background: white; cursor: pointer;">
+                        <option value="'Outfit', sans-serif">Padrão (Outfit)</option>
+                        <option value="'Comic Sans MS', 'Comic Sans', cursive">Arredondada (Comic Sans)</option>
+                        <option value="Georgia, 'Times New Roman', serif">Serifada (Georgia)</option>
+                        <option value="'Courier New', monospace">Monoespaçada (Courier)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="mirror-exercise-target-company-group" style="display:none;">
+                    <label for="mirror-exercise-target-company">Enviar para empresa (opcional)</label>
+                    <select id="mirror-exercise-target-company" style="width: 100%; height: 40px; border: 1px solid #ddd; border-radius: 8px; padding: 0 10px; background: white; cursor: pointer;">
+                        <option value="">Nenhuma (global, todo mundo vê)</option>
+                    </select>
+                </div>
+
+                <div id="mirror-items-container"></div>
+
+                <button type="button" class="btn-secondary" id="btn-add-mirror-item"
+                    style="margin-bottom: 20px; width: 100%;">
+                    <i class="fas fa-plus" aria-hidden="true"></i> Adicionar outra frase a este exercício
+                </button>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" id="btn-cancel-mirror-exercise">Cancelar</button>
                     <button type="submit" class="btn-primary"
                         style="background: linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%);">Salvar Exercício</button>
                 </div>
@@ -2688,12 +2698,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=53">
+    <link rel="stylesheet" href="style.css?v=54">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=117"></script>
+    <script defer src="app.js?v=118"></script>
 </body>
 
 

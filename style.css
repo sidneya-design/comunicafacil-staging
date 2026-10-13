@@ -425,6 +425,8 @@ body {
 .exercise-type-option.reading-text i { color: #2563eb; }
 .exercise-type-option.monte-frase { border-color: #a5b4fc; }
 .exercise-type-option.monte-frase i { color: #4f46e5; }
+.exercise-type-option.mirror { border-color: #fca5a5; }
+.exercise-type-option.mirror i { color: #e53935; }
 
 .reading-text-phrase-block { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
 .reading-text-phrase-input { flex: 1; height: 40px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; padding: 0 12px; font-size: 15px; font-family: inherit; }
@@ -4833,7 +4835,8 @@ button, .action-btn { touch-action: manipulation; }
    ESPELHO — frase à esquerda, câmera sempre aberta à direita
    ============================================= */
 .mirror-game { height: 100%; min-height: 0; flex-direction: column; gap: 10px; background: #fff; border-radius: var(--radius); }
-.mirror-header { flex-shrink: 0; margin-bottom: 0; padding: 10px 14px; }
+.mirror-header { flex-shrink: 0; margin-bottom: 0; padding: 10px 14px; justify-content: space-between; }
+.mirror-deck-title { font-size: 1.05rem; color: #29243b; }
 .mirror-progress {
     font-size: 18px; font-weight: bold; color: #555;
     background: rgba(0,0,0,0.05); padding: 6px 16px; border-radius: 20px;
@@ -4855,7 +4858,6 @@ button, .action-btn { touch-action: manipulation; }
     font-size: clamp(2rem, 4.5vw, 4rem); line-height: 1.1; letter-spacing: -1px;
     overflow-wrap: anywhere;
 }
-.mirror-phrase strong { color: var(--mirror-highlight, #0078ff); }
 .mirror-controls { display: flex; gap: 12px; flex-wrap: wrap; }
 .mirror-btn {
     display: inline-flex; align-items: center; gap: 10px; border: none; border-radius: 50px;
@@ -4948,36 +4950,6 @@ button, .action-btn { touch-action: manipulation; }
     position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 10px 12px; border-radius: 12px;
     background: rgba(229, 57, 53, 0.92); color: #fff; font-size: 14px; font-weight: 600; text-align: center;
 }
-
-.mirror-phrases-modal-content { max-width: 620px; }
-.mirror-form-hint { color: #777; font-size: 13px; }
-.mirror-phrase-preview {
-    font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 22px; color: #1f1f1f; min-height: 28px;
-    line-height: 1.1; letter-spacing: -1px; max-height: 220px; overflow: auto; overflow-wrap: anywhere;
-    padding: 10px; border-radius: 10px; background: #f7f9fc;
-}
-.mirror-phrase-preview:empty { display: none; }
-.mirror-size-row { display: flex; gap: 8px; align-items: center; }
-.mirror-size-row input { flex: 1; min-width: 0; height: 40px; padding: 0 10px; border: 1px solid #ddd; border-radius: 8px; }
-.mirror-size-step, .mirror-size-auto {
-    height: 40px; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer;
-    font-family: inherit; font-weight: 700; color: #333; padding: 0 12px;
-}
-.mirror-size-step { min-width: 44px; font-size: 16px; }
-.mirror-size-step:hover, .mirror-size-auto:hover { background: #f0f3f8; }
-.mirror-phrase-preview strong, .mirror-phrases-list strong { color: var(--mirror-highlight, #0078ff); }
-.mirror-phrases-list { list-style: none; margin: 20px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.mirror-phrases-list li {
-    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-    border: 1px solid #e3e7ee; border-radius: 10px; font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 17px;
-}
-.mirror-phrases-list li .mirror-phrase-text { flex: 1; min-width: 0; }
-.mirror-phrases-list li button {
-    background: rgba(0,0,0,0.05); border: none; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; color: #444;
-}
-.mirror-phrases-list li button:hover { background: rgba(0,0,0,0.12); }
-.mirror-phrases-list .mirror-phrase-scope { font-size: 12px; font-weight: 600; color: #888; }
-.mirror-phrases-empty { color: #888; text-align: center; padding: 16px; }
 
 @media (max-width: 768px) {
     .mirror-layout { flex-direction: column-reverse; gap: 16px; padding: 10px 16px 16px; overflow-y: auto; }
