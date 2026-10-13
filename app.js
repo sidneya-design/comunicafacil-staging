@@ -89,10 +89,10 @@ const localForcesImages = {
 const isStagingSiteHost = window.location.hostname === 'comunicafacil-staging.netlify.app';
 const useStagingSupabase = isStagingSiteHost || (isLocalAppHost() && new URLSearchParams(window.location.search).get('sb') === 'staging');
 const supabaseUrl = useStagingSupabase
-    ? 'https://aoyuqkpmlnjghozmsmjp.supabase.co'
+    ? 'https://iqiiilddodttvrxodwbd.supabase.co'
     : 'https://rrubmvykindvilptjhma.supabase.co';
 const supabaseKey = useStagingSupabase
-    ? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFveXVxa3BtbG5qZ2hvem1zbWpwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3ODE4NzYsImV4cCI6MjEwNjM1Nzg3Nn0.y7_m-15OUFIheqvTzFKoSwKzuFU2ax7Wgp_8hr89dZo'
+    ? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlxaWlpbGRkb2R0dHZyeG9kd2JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNjg4NjEsImV4cCI6MjEwMTk0NDg2MX0.Po7_bLntUw-RFt92Lw2WIsrJoasrrg1VBWl7zm1vDSM'
     : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJydWJtdnlraW5kdmlscHRqaG1hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0ODE2OTksImV4cCI6MjA5ODA1NzY5OX0.4eKcRhUReuaKaaq4ftIOWe6vvB9qxL4Sjiii-3QX5eM';
 // O cache de TTS em áudio (ver getTtsAudio) cresce sem limite no localStorage — uma entrada
 // por frase falada, nunca removida. Com o tempo isso estoura a quota do navegador, e daí um
@@ -1874,7 +1874,7 @@ function setDoctorTab(tabName) {
 }
 
 function setAdminTab(tabName) {
-    const tabs = ['users', 'companies', 'usage', 'evolution', 'reminders', 'modules', 'logs'];
+    const tabs = ['users', 'companies', 'usage', 'evolution', 'reminders', 'modules', 'voice', 'logs'];
     
     tabs.forEach(tab => {
         const btn = document.getElementById(`btn-admin-tab-${tab}`);
@@ -1903,6 +1903,8 @@ function setAdminTab(tabName) {
         applyModuleVisibility(); // Refreshes UI and re-renders the panel
     } else if (tabName === 'logs') {
         loadAdminLogsPanel();
+    } else if (tabName === 'voice') {
+        loadTtsVoiceSetting().then(renderAdminVoicePanel);
     }
 }
 
@@ -2216,9 +2218,45 @@ async function getIaEndpointHeaders() {
     return headers;
 }
 
-async function fetchTtsAudio(endpoint, text, ttsRate) {
+// Voz do app (aba "Voz do app" no admin, app_settings 'tts_voice'). Fica
+// também no localStorage pra o Complete a Frase e o Monte a Frase (páginas
+// próprias no mesmo domínio) usarem a mesma voz. Nula = voz padrão da função.
+const TTS_VOICE_STORAGE_KEY = 'comunica_tts_voice';
+const TTS_VOICE_OPTIONS = [
+    { id: 'pt-BR-Chirp3-HD-Kore', label: 'Kore', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Aoede', label: 'Aoede', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Leda', label: 'Leda', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Charon', label: 'Charon', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Puck', label: 'Puck', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Orus', label: 'Orus', gender: 'Masculina' }
+];
+let currentTtsVoice = (() => {
+    try { return localStorage.getItem(TTS_VOICE_STORAGE_KEY) || null; } catch (e) { return null; }
+})();
+
+function setCurrentTtsVoice(voice) {
+    if ((voice || null) === currentTtsVoice) return;
+    currentTtsVoice = voice || null;
+    try {
+        if (currentTtsVoice) localStorage.setItem(TTS_VOICE_STORAGE_KEY, currentTtsVoice);
+        else localStorage.removeItem(TTS_VOICE_STORAGE_KEY);
+    } catch (e) { /* sem localStorage: vale só nesta aba */ }
+    // Áudios já carregados na memória são da voz anterior.
+    azureTtsCache.clear();
+}
+
+async function loadTtsVoiceSetting() {
+    if (!supabaseClient) return;
+    try {
+        const { data, error } = await supabaseClient.from('app_settings').select('value').eq('key', 'tts_voice').maybeSingle();
+        if (!error) setCurrentTtsVoice(data?.value || null);
+    } catch (e) { /* mantém a voz que já estava */ }
+}
+
+async function fetchTtsAudio(endpoint, text, ttsRate, voice = currentTtsVoice) {
     const body = { ttsText: text };
     if (ttsRate) body.ttsRate = ttsRate;
+    if (voice) body.ttsVoice = voice;
     const response = await fetch(endpoint, {
         method: 'POST',
         headers: await getIaEndpointHeaders(),
@@ -2267,7 +2305,10 @@ function releaseTtsPrefetchSlot() {
 }
 
 function getTtsAudio(text, rateKey, ttsRate, isPrefetch = false) {
-    const cacheKey = rateKey ? (text + '::rate::' + rateKey) : text;
+    // Voz na chave do cache: trocar a voz no admin não pode tocar áudio antigo
+    // da voz anterior. Sem voz escolhida, a chave fica igual à de sempre.
+    const baseKey = rateKey ? (text + '::rate::' + rateKey) : text;
+    const cacheKey = currentTtsVoice ? (currentTtsVoice + '::' + baseKey) : baseKey;
     if (azureTtsCache.has(cacheKey)) {
         if (!isPrefetch) ttsPrefetchWaiting.get(cacheKey)?.(false);
         return azureTtsCache.get(cacheKey);
@@ -13871,6 +13912,7 @@ if (supabaseClient) {
             isAdmin = isCompleteSentenceLocalDemo() || role === 'editor' || role === 'admin';
             canManageUsers = role === 'admin';
             isDoctor = role === 'doctor'; // Não entra em isAdmin: médico não deve editar conteúdo geral
+            loadTtsVoiceSetting(); // voz do app escolhida pelo admin (não bloqueia o resto do login)
 
             if (isDoctor) {
                 const { data: memberRow } = await supabaseClient
@@ -14838,6 +14880,112 @@ document.getElementById('btn-admin-tab-usage')?.addEventListener('click', () => 
 document.getElementById('btn-admin-tab-evolution')?.addEventListener('click', () => setAdminTab('evolution'));
 document.getElementById('btn-admin-tab-reminders')?.addEventListener('click', () => setAdminTab('reminders'));
 document.getElementById('btn-admin-tab-modules')?.addEventListener('click', () => setAdminTab('modules'));
+document.getElementById('btn-admin-tab-voice')?.addEventListener('click', () => setAdminTab('voice'));
+
+// ---- Aba "Voz do app": escolhe a voz do Google TTS pro app inteiro ----
+const TTS_VOICE_SAMPLE_TEXT = 'Olá! Eu sou a voz do Comunica Fácil. Bom dia, tudo bem?';
+let adminVoiceSampleAudio = null;
+let adminVoiceSamplePlaying = null; // id da voz tocando agora
+
+function showAdminVoiceFeedback(message, isError = false) {
+    const el = document.getElementById('admin-voice-feedback');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('error', isError);
+    el.style.display = message ? 'block' : 'none';
+}
+
+function renderAdminVoicePanel() {
+    const list = document.getElementById('admin-voice-list');
+    if (!list) return;
+    list.innerHTML = '';
+    // Sem voz escolhida ainda, a função usa a Kore (padrão) — mostra ela como a atual.
+    const activeVoice = currentTtsVoice || TTS_VOICE_OPTIONS[0].id;
+    TTS_VOICE_OPTIONS.forEach(voice => {
+        const isActive = voice.id === activeVoice;
+        const card = document.createElement('div');
+        card.className = 'tts-voice-card' + (isActive ? ' is-active' : '');
+
+        const info = document.createElement('div');
+        info.className = 'tts-voice-info';
+        info.innerHTML = `<strong></strong><span></span>`;
+        info.querySelector('strong').textContent = voice.label;
+        info.querySelector('span').textContent = voice.gender + (isActive ? ' · em uso' : '');
+
+        const sampleBtn = document.createElement('button');
+        sampleBtn.type = 'button';
+        sampleBtn.className = 'btn-secondary tts-voice-sample';
+        const isPlaying = adminVoiceSamplePlaying === voice.id;
+        sampleBtn.innerHTML = isPlaying
+            ? '<i class="fas fa-stop" aria-hidden="true"></i> Parar'
+            : '<i class="fas fa-play" aria-hidden="true"></i> Ouvir';
+        sampleBtn.setAttribute('aria-label', `${isPlaying ? 'Parar' : 'Ouvir'} amostra da voz ${voice.label}`);
+        sampleBtn.addEventListener('click', () => playAdminVoiceSample(voice, sampleBtn));
+
+        const useBtn = document.createElement('button');
+        useBtn.type = 'button';
+        useBtn.className = 'btn-primary tts-voice-use';
+        useBtn.textContent = isActive ? 'Em uso' : 'Usar esta voz';
+        useBtn.disabled = isActive;
+        useBtn.addEventListener('click', () => saveTtsVoiceSetting(voice));
+
+        card.append(info, sampleBtn, useBtn);
+        list.appendChild(card);
+    });
+}
+
+async function playAdminVoiceSample(voice, button) {
+    if (adminVoiceSampleAudio) { adminVoiceSampleAudio.pause(); adminVoiceSampleAudio = null; }
+    if (adminVoiceSamplePlaying === voice.id) {
+        adminVoiceSamplePlaying = null;
+        renderAdminVoicePanel();
+        return;
+    }
+    adminVoiceSamplePlaying = voice.id;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Carregando';
+    try {
+        // Direto na função da nuvem (sem cache): o servidor local de
+        // desenvolvimento não usa o Google e tocaria sempre a mesma voz.
+        const response = await fetch(SUPABASE_CHAT_ENDPOINT, {
+            method: 'POST',
+            headers: await getIaEndpointHeaders(),
+            body: JSON.stringify({ ttsText: TTS_VOICE_SAMPLE_TEXT, ttsVoice: voice.id })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.audio) throw new Error(data.error || `Erro HTTP ${response.status}`);
+        const audioBase64 = data.audio;
+        if (adminVoiceSamplePlaying !== voice.id) return; // clicou em outra no meio
+        // Sem a chave do Google (ou com erro nela) a função cai na voz padrão e
+        // todas as amostras soariam iguais — avisa em vez de enganar.
+        const notGoogle = data.provider && data.provider !== 'google';
+        adminVoiceSampleAudio = new Audio('data:audio/mp3;base64,' + audioBase64);
+        adminVoiceSampleAudio.onended = () => { adminVoiceSamplePlaying = null; renderAdminVoicePanel(); };
+        renderAdminVoicePanel();
+        await adminVoiceSampleAudio.play();
+        showAdminVoiceFeedback(notGoogle
+            ? 'Atenção: o Google TTS não respondeu neste ambiente (chave GOOGLE_TTS_API_KEY ausente ou com erro), então a amostra saiu na voz padrão. Confira o secret da função "chat" no Supabase.'
+            : '', notGoogle);
+    } catch (e) {
+        adminVoiceSamplePlaying = null;
+        renderAdminVoicePanel();
+        showAdminVoiceFeedback('Não foi possível tocar a amostra: ' + (e?.message || e), true);
+    }
+}
+
+async function saveTtsVoiceSetting(voice) {
+    if (!supabaseClient) return;
+    const { error } = await supabaseClient.from('app_settings').upsert({
+        key: 'tts_voice', value: voice.id, updated_at: new Date().toISOString(), updated_by: currentUserId
+    });
+    if (error) {
+        showAdminVoiceFeedback('Não foi possível salvar a voz: ' + error.message, true);
+        return;
+    }
+    setCurrentTtsVoice(voice.id);
+    showAdminVoiceFeedback(`Pronto! A voz ${voice.label} passa a ser usada no app. Quem já está com o app aberto passa a ouvir a voz nova ao recarregar a página.`);
+    renderAdminVoicePanel();
+}
 document.getElementById('btn-admin-tab-logs')?.addEventListener('click', () => setAdminTab('logs'));
 
 document.getElementById('btn-doctor-tab-patients')?.addEventListener('click', () => setDoctorTab('patients'));

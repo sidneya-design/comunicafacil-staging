@@ -214,14 +214,20 @@ const visualClue = document.getElementById("visual-clue");
 const exerciseCard = document.getElementById("exercise-card");
 const summaryCard = document.getElementById("summary-card");
 const speechPanel = document.getElementById("speech-panel");
-const speechSlow = document.getElementById("speech-slow");
+const speedOptions = [...document.querySelectorAll(".speed-option")];
 
 function currentExercise() { return levels[state.level][state.round]; }
 
-// As peças aparecem em minúsculas e sem pontuação: a maiúscula inicial e o
-// ponto final entregariam a primeira e a última palavra.
+// As peças aparecem sem pontuação (o ponto final entregaria a última palavra),
+// mas com as maiúsculas da frase cadastrada (pedido do usuário). A conferência
+// usa sempre as palavras em minúsculas, então a maiúscula não muda o que é
+// resposta certa.
+function displayWords(text) {
+    return text.replace(/[.?!,;:]/g, "").split(/\s+/).filter(Boolean);
+}
+
 function sentenceWords(text) {
-    return text.replace(/[.?!,;:]/g, "").split(/\s+/).filter(Boolean).map(word => word.toLocaleLowerCase("pt-BR"));
+    return displayWords(text).map(word => word.toLocaleLowerCase("pt-BR"));
 }
 
 function acceptedOrders(item) {
@@ -254,13 +260,30 @@ function shuffleForDisplay(items, orders) {
 const LOCAL_API = "http://127.0.0.1:5001";
 const ttsCache = new Map();
 let currentAudio = null;
-let slowModel = false;
+// Velocidade escolhida pelo paciente (Devagar/Normal/Rápido); vale para todo
+// áudio do exercício e fica guardada neste aparelho.
+const RATE_KEY = "monte-frase:audio-rate";
+const RATES = [0.75, 1, 1.25];
+let audioRate = 1;
+try {
+    const saved = Number(localStorage.getItem(RATE_KEY));
+    if (RATES.includes(saved)) audioRate = saved;
+} catch (error) { /* sem armazenamento: fica no Normal */ }
+
+// Voz escolhida no admin ("Voz do app"): o app grava no localStorage
+// (comunica_tts_voice), e esta página, no mesmo domínio, usa a mesma voz.
+function currentTtsVoice() {
+    try { return localStorage.getItem("comunica_tts_voice") || null; } catch (error) { return null; }
+}
 
 async function fetchTtsAudio(endpoint, text) {
+    const body = { ttsText: text };
+    const voice = currentTtsVoice();
+    if (voice) body.ttsVoice = voice;
     const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ttsText: text })
+        body: JSON.stringify(body)
     });
     const data = await response.json();
     if (!response.ok || !data.audio) throw new Error(data.error || `Erro HTTP ${response.status}`);
@@ -269,21 +292,27 @@ async function fetchTtsAudio(endpoint, text) {
 
 async function fetchSupabaseTtsAudio(text) {
     if (!supabase) throw new Error("Supabase indisponível");
-    const { data, error } = await supabase.functions.invoke("chat", { body: { ttsText: text } });
+    const body = { ttsText: text };
+    const voice = currentTtsVoice();
+    if (voice) body.ttsVoice = voice;
+    const { data, error } = await supabase.functions.invoke("chat", { body });
     if (error || !data?.audio) throw error || new Error(data?.error || "Resposta sem áudio");
     return data.audio;
 }
 
 function getTtsAudio(text) {
-    if (ttsCache.has(text)) return ttsCache.get(text);
+    // Voz na chave do cache (só memória): a voz pode mudar entre aberturas.
+    const voice = currentTtsVoice();
+    const cacheKey = voice ? `${voice}::${text}` : text;
+    if (ttsCache.has(cacheKey)) return ttsCache.get(cacheKey);
     const promise = (async () => {
         if (isLocalhost) {
             try { return await fetchTtsAudio(`${LOCAL_API}/chat`, text); } catch (localError) { /* cai pro Supabase */ }
         }
         return fetchSupabaseTtsAudio(text);
     })();
-    promise.catch(() => ttsCache.delete(text));
-    ttsCache.set(text, promise);
+    promise.catch(() => ttsCache.delete(cacheKey));
+    ttsCache.set(cacheKey, promise);
     return promise;
 }
 
@@ -292,28 +321,28 @@ function stopAudio() {
     if (currentAudio) currentAudio.pause();
 }
 
-function speakNative(text, slow) {
+function speakNative(text) {
     if (!("speechSynthesis" in window)) return;
     const utterance = new SpeechSynthesisUtterance(text);
     const ptVoices = window.speechSynthesis.getVoices().filter(voice => voice.lang.startsWith("pt"));
     utterance.voice = ptVoices.find(voice => voice.name.includes("Google") || voice.name.includes("Luciana")) || ptVoices[0] || null;
     utterance.lang = "pt-BR";
-    utterance.rate = slow ? 0.5 : 0.7;
+    utterance.rate = 0.7 * audioRate;
     window.speechSynthesis.speak(utterance);
 }
 
 // `force` é pra clique explícito em "Ouvir": o botão de som desliga só as
 // falas automáticas (elogio ao acertar), não o que a pessoa pediu pra ouvir.
-async function speak(text, { force = false, slow = false } = {}) {
+async function speak(text, { force = false } = {}) {
     if (!text || (!state.sound && !force)) return;
     stopAudio();
     try {
         const audioBase64 = await getTtsAudio(text);
         currentAudio = new Audio(`data:audio/mp3;base64,${audioBase64}`);
-        currentAudio.playbackRate = slow ? 0.75 : 1;
+        currentAudio.playbackRate = audioRate;
         await currentAudio.play();
     } catch (error) {
-        speakNative(text, slow);
+        speakNative(text);
     }
 }
 
@@ -388,13 +417,13 @@ function tapTile(tile) {
     afterBoardMove();
 }
 
-function createTile(word) {
+function createTile(word, label = word) {
     const tile = document.createElement("button");
     tile.type = "button";
     tile.className = "board-word";
     tile.dataset.word = word;
     tile.draggable = false;
-    tile.textContent = word;
+    tile.textContent = label;
     tile.addEventListener("pointerdown", event => startTileDrag(event, tile));
     // Toque/clique do mouse é tratado no pointerup (endTileDrag); este click
     // só atende o teclado (Enter/Espaço), que chega com detail 0.
@@ -607,7 +636,14 @@ function renderExercise() {
     summaryCard.hidden = true;
     sentenceArea.innerHTML = "";
     selectedTile = null;
-    shuffleForDisplay(sentenceWords(item.text), acceptedOrders(item)).forEach(word => sentenceArea.appendChild(createTile(word)));
+    // Grafia original de cada palavra; palavra repetida usa as grafias na ordem.
+    const labels = new Map();
+    displayWords(item.text).forEach(original => {
+        const key = original.toLocaleLowerCase("pt-BR");
+        labels.set(key, [...(labels.get(key) || []), original]);
+    });
+    shuffleForDisplay(sentenceWords(item.text), acceptedOrders(item))
+        .forEach(word => sentenceArea.appendChild(createTile(word, labels.get(word)?.shift() || word)));
     visualClue.textContent = item.icon || "";
     visualClue.classList.toggle("visible", Boolean(item.icon));
     listenButton.classList.remove("visible");
@@ -750,11 +786,18 @@ document.getElementById("board-next").addEventListener("click", () => leaveRound
 
 hintButton.addEventListener("click", giveHint);
 listenButton.addEventListener("click", () => speak(modelText(), { force: true }));
-document.getElementById("speech-model").addEventListener("click", () => speak(modelText(), { force: true, slow: slowModel }));
-speechSlow.addEventListener("click", () => {
-    slowModel = !slowModel;
-    speechSlow.setAttribute("aria-pressed", String(slowModel));
-});
+document.getElementById("speech-model").addEventListener("click", () => speak(modelText(), { force: true }));
+function renderSpeed() {
+    speedOptions.forEach(option => option.setAttribute("aria-pressed", String(Number(option.dataset.rate) === audioRate)));
+}
+speedOptions.forEach(option => option.addEventListener("click", () => {
+    audioRate = Number(option.dataset.rate);
+    try { localStorage.setItem(RATE_KEY, String(audioRate)); } catch (error) { /* só nesta visita */ }
+    renderSpeed();
+    // Áudio tocando muda na hora; a voz do navegador vale a partir da próxima fala.
+    if (currentAudio && !currentAudio.paused) currentAudio.playbackRate = audioRate;
+}));
+renderSpeed();
 document.getElementById("summary-restart").addEventListener("click", () => startLevel());
 document.getElementById("sound-toggle").addEventListener("click", event => {
     state.sound = !state.sound;

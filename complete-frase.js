@@ -272,11 +272,20 @@ function speakNative(text) {
     window.speechSynthesis.speak(utterance);
 }
 
+// Voz escolhida no admin ("Voz do app"): o app grava no localStorage
+// (comunica_tts_voice), e esta página, no mesmo domínio, usa a mesma voz.
+function currentTtsVoice() {
+    try { return localStorage.getItem("comunica_tts_voice") || null; } catch (error) { return null; }
+}
+
 async function fetchTtsAudio(endpoint, text) {
+    const body = { ttsText: speechText(text) };
+    const voice = currentTtsVoice();
+    if (voice) body.ttsVoice = voice;
     const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ttsText: speechText(text) })
+        body: JSON.stringify(body)
     });
     const data = await response.json();
     if (!response.ok || !data.audio) throw new Error(data.error || `Erro HTTP ${response.status}`);
@@ -287,17 +296,23 @@ async function fetchTtsAudio(endpoint, text) {
 // sessão e usa o projeto certo (produção ou staging). O fetch sem cabeçalho
 // que existia aqui levava 401 e caía sempre na voz do navegador.
 async function fetchSupabaseTtsAudio(text) {
-    const { data, error } = await supabase.functions.invoke("chat", { body: { ttsText: speechText(text) } });
+    const body = { ttsText: speechText(text) };
+    const voice = currentTtsVoice();
+    if (voice) body.ttsVoice = voice;
+    const { data, error } = await supabase.functions.invoke("chat", { body });
     if (error || !data?.audio) throw error || new Error(data?.error || "Resposta sem áudio");
     return data.audio;
 }
 
 function getTtsAudio(text) {
     const normalizedText = speechText(text);
-    if (ttsCache.has(normalizedText)) return ttsCache.get(normalizedText);
+    // Voz na chave: trocar a voz no admin não pode tocar áudio da voz anterior.
+    const voice = currentTtsVoice();
+    const cacheKey = voice ? `${voice}::${normalizedText}` : normalizedText;
+    if (ttsCache.has(cacheKey)) return ttsCache.get(cacheKey);
     const promise = (async () => {
         try {
-            const stored = localStorage.getItem(TTS_STORAGE_PREFIX + normalizedText);
+            const stored = localStorage.getItem(TTS_STORAGE_PREFIX + cacheKey);
             if (stored) return stored;
         } catch (error) { /* continua sem cache persistente */ }
 
@@ -312,7 +327,7 @@ function getTtsAudio(text) {
             audioBase64 = await fetchSupabaseTtsAudio(normalizedText);
         }
         try {
-            localStorage.setItem(TTS_STORAGE_PREFIX + normalizedText, audioBase64);
+            localStorage.setItem(TTS_STORAGE_PREFIX + cacheKey, audioBase64);
         } catch (error) {
             // Cache cheio: libera as entradas de TTS antigas (facilmente reconstruídas) e
             // tenta de novo, pra não deixar a quota do localStorage lotada — o que impediria
@@ -324,13 +339,13 @@ function getTtsAudio(text) {
                     if (key && key.startsWith('comunica_tts_')) keysToRemove.push(key);
                 }
                 keysToRemove.forEach(k => localStorage.removeItem(k));
-                localStorage.setItem(TTS_STORAGE_PREFIX + normalizedText, audioBase64);
+                localStorage.setItem(TTS_STORAGE_PREFIX + cacheKey, audioBase64);
             } catch (error2) { /* cache cheio: só memória */ }
         }
         return audioBase64;
     })();
-    promise.catch(() => ttsCache.delete(normalizedText));
-    ttsCache.set(normalizedText, promise);
+    promise.catch(() => ttsCache.delete(cacheKey));
+    ttsCache.set(cacheKey, promise);
     return promise;
 }
 

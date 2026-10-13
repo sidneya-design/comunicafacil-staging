@@ -4962,3 +4962,16 @@ button, .action-btn { touch-action: manipulation; }
     .mirror-camera { height: auto; width: 100%; aspect-ratio: 1/1; max-height: 45vh; }
     .mirror-left { height: auto; width: 100%; }
 }
+
+/* Aba "Voz do app" (admin): uma linha por voz, com amostra e "Usar esta voz" */
+.tts-voice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.tts-voice-card {
+    display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+    background: #fff; border: 2px solid #e3e7ee; border-radius: 12px;
+}
+.tts-voice-card.is-active { border-color: #2196F3; background: #f3f9ff; }
+.tts-voice-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tts-voice-info strong { font-size: 1.05rem; color: #1f2933; }
+.tts-voice-info span { font-size: 0.85rem; color: #52514e; }
+.tts-voice-card .tts-voice-sample, .tts-voice-card .tts-voice-use { padding: 8px 12px; font-size: 14px; border-radius: 8px; white-space: nowrap; }
+.tts-voice-card .tts-voice-use:disabled { opacity: .6; cursor: default; }

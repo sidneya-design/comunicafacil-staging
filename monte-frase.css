@@ -129,6 +129,11 @@ body.board-mode #hint-button { grid-column: 1; grid-row: 1; justify-self: start;
     transition: transform .18s ease, background .18s ease;
 }
 
+.speed-control { display: inline-flex; align-items: center; gap: 4px; padding: 4px; color: var(--purple-dark); background: #fff; border: 2px solid #cfc3f1; border-radius: 14px; }
+.speed-control > i { padding: 0 6px; }
+.speed-option { min-height: 36px; padding: 0 12px; color: var(--purple-dark); background: transparent; border: 0; border-radius: 10px; font: inherit; font-weight: 750; cursor: pointer; }
+.speed-option[aria-pressed="true"] { color: #fff; background: var(--purple); }
+
 .speech-button[aria-pressed="true"] { color: #fff; background: var(--purple); border-color: var(--purple); }
 .speech-button:disabled { opacity: .55; cursor: not-allowed; }
 

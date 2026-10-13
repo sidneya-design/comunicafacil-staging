@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
       // ----------------------------------------------------
       // FLUXO DE TEXTO CLÁSSICO
       // ----------------------------------------------------
-      const { messages, generateAudio, ttsText, ttsRate } = await req.json();
+      const { messages, generateAudio, ttsText, ttsRate, ttsVoice } = await req.json();
 
       // TTS puro (botão de som dos exercícios): só sintetiza o texto recebido,
       // sem passar pelo agente de IA. Ordem: Google Cloud TTS (se configurado),
@@ -101,28 +101,33 @@ Deno.serve(async (req) => {
       // navegador via playbackRate). Sem ttsRate, mantém o -15% padrão de sempre.
       if (ttsText) {
         let audioBase64: string | null = null;
+        // Qual serviço gerou o áudio — a aba "Voz do app" avisa quando não foi o
+        // Google (sem chave/erro), senão as amostras soariam todas iguais.
+        let provider = "google";
         // 1º Google Cloud TTS, se o secret GOOGLE_TTS_API_KEY existir no projeto
         // (vozes Chirp 3 HD dentro da cota grátis mensal); qualquer erro cai no
         // edge-tts de sempre, então sem a chave nada muda.
         const googleKey = Deno.env.get("GOOGLE_TTS_API_KEY");
         if (googleKey) {
           try {
-            audioBase64 = await synthesizeTextWithGoogle(cleanTextForSpeech(ttsText), googleKey, ttsRate);
+            audioBase64 = await synthesizeTextWithGoogle(cleanTextForSpeech(ttsText), googleKey, ttsRate, ttsVoice);
           } catch (googleError) {
             console.error("Google TTS falhou, usando edge-tts:", (googleError as Error).message);
           }
         }
         if (!audioBase64) {
+          provider = "edge-tts";
           try {
             audioBase64 = encodeBase64(await edgeTtsSynthesize(cleanTextForSpeech(ttsText), undefined, ttsRate));
           } catch (edgeError) {
             console.error("edge-tts falhou, tentando Azure:", (edgeError as Error).message);
             if (!apiKey) throw edgeError;
+            provider = "azure";
             audioBase64 = await synthesizeTextWithAzure(ttsText, apiKey);
           }
         }
         return new Response(
-          JSON.stringify({ audio: audioBase64 }),
+          JSON.stringify({ audio: audioBase64, provider }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
         );
       }
@@ -235,8 +240,23 @@ export function cleanTextForSpeech(text: string): string {
 // GOOGLE_TTS_VOICE (padrão: Chirp 3 HD feminina em pt-BR). ttsRate chega no
 // formato do SSML ("-15%", "+10%"); sem ele, -15% como no edge-tts, pra manter
 // o ritmo mais calmo de sempre.
-async function synthesizeTextWithGoogle(text: string, apiKey: string, ttsRate?: string): Promise<string> {
-  const voiceName = Deno.env.get("GOOGLE_TTS_VOICE") || "pt-BR-Chirp3-HD-Kore";
+// Vozes que o app pode pedir (seletor "Voz do app" no admin, app_settings
+// 'tts_voice'). Lista fixa de propósito: sem ela, qualquer usuário logado
+// poderia usar a chave do Google pra gerar qualquer voz.
+const ALLOWED_GOOGLE_VOICES = new Set([
+  "pt-BR-Chirp3-HD-Kore",
+  "pt-BR-Chirp3-HD-Aoede",
+  "pt-BR-Chirp3-HD-Leda",
+  "pt-BR-Chirp3-HD-Charon",
+  "pt-BR-Chirp3-HD-Puck",
+  "pt-BR-Chirp3-HD-Orus",
+]);
+
+async function synthesizeTextWithGoogle(text: string, apiKey: string, ttsRate?: string, requestedVoice?: string): Promise<string> {
+  // Voz pedida pelo app (se estiver na lista) → GOOGLE_TTS_VOICE → Kore.
+  const voiceName = (requestedVoice && ALLOWED_GOOGLE_VOICES.has(requestedVoice))
+    ? requestedVoice
+    : (Deno.env.get("GOOGLE_TTS_VOICE") || "pt-BR-Chirp3-HD-Kore");
   const ratePercent = Number.parseFloat(String(ttsRate ?? "-15%").replace("%", ""));
   const speakingRate = Number.isFinite(ratePercent) ? Math.min(2, Math.max(0.25, 1 + ratePercent / 100)) : 0.85;
 

@@ -927,6 +927,7 @@
                         <button class="admin-tab" id="btn-admin-tab-evolution" data-admin-tab="evolution" type="button" role="tab" aria-selected="false">Evolução</button>
                         <button class="admin-tab" id="btn-admin-tab-reminders" data-admin-tab="reminders" type="button" role="tab" aria-selected="false">Lembretes</button>
                         <button class="admin-tab" id="btn-admin-tab-modules" data-admin-tab="modules" type="button" role="tab" aria-selected="false">Módulos</button>
+                        <button class="admin-tab" id="btn-admin-tab-voice" data-admin-tab="voice" type="button" role="tab" aria-selected="false">Voz do app</button>
                         <button class="admin-tab" id="btn-admin-tab-logs" data-admin-tab="logs" type="button" role="tab" aria-selected="false">Logs</button>
                     </div>
 
@@ -1163,6 +1164,17 @@
                     </section>
 
                     <!-- Aba: Controle de Módulos -->
+                    <section class="admin-tab-panel" id="admin-voice-panel" role="tabpanel" aria-labelledby="btn-admin-tab-voice">
+                        <div class="media-header">
+                            <div>
+                                <h2>Voz do app</h2>
+                                <p class="media-hint" style="margin-top: 5px;">Escolha a voz que lê os cards, exercícios e jogos para todos os usuários. Toque em "Ouvir" para comparar.</p>
+                            </div>
+                        </div>
+                        <div id="admin-voice-feedback" class="admin-feedback" role="status" aria-live="polite" style="display:none;"></div>
+                        <div class="tts-voice-grid" id="admin-voice-list"></div>
+                    </section>
+
                     <section class="admin-tab-panel" id="admin-modules-panel" role="tabpanel" aria-labelledby="btn-admin-tab-modules">
                         <div class="media-header">
                             <div>
@@ -2698,12 +2710,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=54">
+    <link rel="stylesheet" href="style.css?v=55">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=119"></script>
+    <script defer src="app.js?v=120"></script>
 </body>
 
 

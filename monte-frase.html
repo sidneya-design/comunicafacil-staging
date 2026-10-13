@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="vendor/fonts/outfit.css">
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="complete-frase.css">
-    <link rel="stylesheet" href="monte-frase.css?v=8">
+    <link rel="stylesheet" href="monte-frase.css?v=9">
 </head>
 
 <body class="board-mode">
@@ -63,6 +63,12 @@
                     <i class="fas fa-volume-high" aria-hidden="true"></i>
                     Ouvir frase
                 </button>
+                <div class="speed-control" role="group" aria-label="Velocidade do áudio">
+                    <i class="fas fa-gauge-simple" aria-hidden="true"></i>
+                    <button class="speed-option" type="button" data-rate="0.75" aria-pressed="false">Devagar</button>
+                    <button class="speed-option" type="button" data-rate="1" aria-pressed="true">Normal</button>
+                    <button class="speed-option" type="button" data-rate="1.25" aria-pressed="false">Rápido</button>
+                </div>
             </div>
 
             <div class="board-top" id="board-top">
@@ -84,9 +90,6 @@
                 <div class="speech-actions">
                     <button class="speech-button" id="speech-model" type="button">
                         <i class="fas fa-volume-high" aria-hidden="true"></i> Ouvir modelo
-                    </button>
-                    <button class="speech-button" id="speech-slow" type="button" aria-pressed="false">
-                        <i class="fas fa-gauge-simple" aria-hidden="true"></i> Devagar
                     </button>
                 </div>
             </section>
@@ -194,7 +197,7 @@
         </aside>
     </div>
 
-    <script src="monte-frase.js?v=12" type="module"></script>
+    <script src="monte-frase.js?v=16" type="module"></script>
 </body>
 
 </html>
