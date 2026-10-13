@@ -447,6 +447,45 @@
                                 title="Atividade Monte a Frase" loading="lazy" allow="microphone"></iframe>
                         </div>
 
+                        <!-- Espelho: lê a frase se vendo na câmera, grava e assiste. O vídeo fica só no navegador. -->
+                        <div id="game-mirror-container" class="mirror-game" style="display:none;">
+                            <div class="memory-header mirror-header">
+                                <span class="mirror-progress" id="mirror-progress">0 / 0</span>
+                                <button type="button" class="edit-mode-btn" id="btn-manage-mirror" style="display:none; margin-left:auto;">
+                                    <i class="fas fa-sliders" aria-hidden="true"></i> Gerenciar frases
+                                </button>
+                            </div>
+                            <div class="mirror-layout">
+                                <button type="button" class="mirror-nav-arrow" id="btn-mirror-prev" aria-label="Frase anterior"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
+                                <div class="mirror-left">
+                                    <div class="mirror-phrase-row">
+                                        <h2 class="mirror-phrase" id="mirror-phrase"></h2>
+                                        <button type="button" class="presentation-audio-btn" id="btn-mirror-listen" aria-label="Ouvir a frase"><i class="fas fa-volume-up" aria-hidden="true"></i></button>
+                                    </div>
+                                    <div class="mirror-controls">
+                                        <button type="button" class="mirror-btn mirror-btn-record" id="btn-mirror-record"><i class="fas fa-circle" aria-hidden="true"></i> <span>Gravar</span></button>
+                                        <button type="button" class="mirror-btn mirror-btn-soft" id="btn-mirror-replay" disabled><i class="fas fa-headphones" aria-hidden="true"></i> Ouvir sua gravação</button>
+                                    </div>
+                                    <div class="mirror-replay" id="mirror-replay"></div>
+                                    <div class="mirror-takes" id="mirror-takes" style="display:none;"></div>
+                                </div>
+                                <div class="mirror-right">
+                                    <div class="mirror-camera" id="mirror-camera">
+                                        <video id="mirror-live" autoplay muted playsinline></video>
+                                        <div class="mirror-rec-badge"><span class="mirror-rec-dot"></span><span id="mirror-timer">0:00</span></div>
+                                        <div class="mirror-mic-meter" id="mirror-mic-meter" style="display:none;" title="Volume do microfone">
+                                            <i class="fas fa-microphone" aria-hidden="true"></i>
+                                            <span class="mirror-mic-bar"><span class="mirror-mic-level" id="mirror-mic-level"></span></span>
+                                        </div>
+                                        <div class="mirror-mic-warning" id="mirror-mic-warning" style="display:none;"></div>
+                                        <div class="mirror-countdown" id="mirror-countdown"></div>
+                                        <div class="mirror-camera-msg" id="mirror-camera-msg"><i class="fas fa-video" aria-hidden="true"></i><span>Abrindo a câmera…</span></div>
+                                    </div>
+                                </div>
+                                <button type="button" class="mirror-nav-arrow" id="btn-mirror-next" aria-label="Próxima frase"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                            </div>
+                        </div>
+
                 </main>
 
                 <!-- Tela: Jogos -->
@@ -1455,6 +1494,18 @@
                     </div>
                 </div>
 
+                <!-- Modal: Frases do Espelho liberadas por Paciente -->
+                <div class="modal-overlay" id="patient-mirror-modal" role="dialog" aria-modal="true" aria-labelledby="patient-mirror-modal-title">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h2 id="patient-mirror-modal-title">Frases do Espelho liberadas</h2>
+                            <button class="close-modal-btn" id="btn-close-patient-mirror" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
+                        </div>
+                        <p class="media-hint" id="patient-mirror-subtitle" style="margin-bottom: 1rem;"></p>
+                        <div id="patient-mirror-list" style="display:flex; flex-direction:column; gap:10px;"></div>
+                    </div>
+                </div>
+
                 <!-- Modal: Livros do banco do médico liberados por Paciente -->
                 <div class="modal-overlay" id="patient-books-modal" role="dialog" aria-modal="true" aria-labelledby="patient-books-modal-title">
                     <div class="modal-content">
@@ -1618,6 +1669,53 @@
                     <button type="submit" class="btn-primary">Salvar Mídia</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal: banco de frases do Espelho -->
+    <div class="modal-overlay" id="mirror-phrases-modal" role="dialog" aria-modal="true" aria-labelledby="mirror-phrases-modal-title">
+        <div class="modal-content mirror-phrases-modal-content">
+            <div class="modal-header">
+                <h2 id="mirror-phrases-modal-title">Frases do Espelho</h2>
+                <button class="close-modal-btn" id="btn-close-mirror-phrases" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
+            </div>
+            <form id="mirror-phrase-form">
+                <div class="form-group">
+                    <label for="mirror-phrase-input" id="mirror-phrase-form-label">Nova frase</label>
+                    <input type="text" id="mirror-phrase-input" required placeholder="Ex: Eu *gos*to de tra*ba*lhar">
+                    <small class="mirror-form-hint">Coloque entre *asteriscos* a sílaba que deve ficar em destaque.</small>
+                </div>
+                <div class="form-group">
+                    <label for="mirror-phrase-size">Tamanho do texto (px)</label>
+                    <div class="mirror-size-row">
+                        <button type="button" class="mirror-size-step" id="btn-mirror-size-down" aria-label="Diminuir texto">A−</button>
+                        <input type="number" id="mirror-phrase-size" min="16" max="200" step="2" placeholder="Automático">
+                        <button type="button" class="mirror-size-step" id="btn-mirror-size-up" aria-label="Aumentar texto">A+</button>
+                        <button type="button" class="mirror-size-auto" id="btn-mirror-size-auto">Automático</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="mirror-text-color-custom">Cor do texto</label>
+                    <div class="card-color-picker" id="mirror-text-color-picker">
+                        <span class="card-color-custom-wrap"><input type="color" id="mirror-text-color-custom" class="card-color-custom" title="Outra cor" value="#FFFFFF"></span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="mirror-highlight-color-custom">Cor do destaque (sílabas entre *asteriscos*)</label>
+                    <div class="card-color-picker" id="mirror-highlight-color-picker">
+                        <span class="card-color-custom-wrap"><input type="color" id="mirror-highlight-color-custom" class="card-color-custom" title="Outra cor" value="#FFFFFF"></span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Prévia</label>
+                    <div class="mirror-phrase-preview" id="mirror-phrase-preview"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" id="btn-cancel-mirror-phrase-edit" style="display:none;">Cancelar edição</button>
+                    <button type="submit" class="btn-primary" id="btn-save-mirror-phrase">Adicionar frase</button>
+                </div>
+            </form>
+            <ul class="mirror-phrases-list" id="mirror-phrases-list"></ul>
         </div>
     </div>
 
@@ -2590,12 +2688,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=51">
+    <link rel="stylesheet" href="style.css?v=52">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=116"></script>
+    <script defer src="app.js?v=117"></script>
 </body>
 
 
