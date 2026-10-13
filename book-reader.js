@@ -1,6 +1,6 @@
 // book-reader.js — ComunicaFácil Netflix-Style Library Module
 
-import { supabase } from './supabase.js?v=4';
+import { supabase } from './supabase.js?v=5';
 
 // ── Config ──────────────────────────────────────────────
 const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 MB

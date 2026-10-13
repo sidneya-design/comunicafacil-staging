@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js?v=4';
+import { supabase } from './supabase.js?v=5';
 
 // Escondido por padrão; só reaparece se applyManagerAccessGuard() (mais
 // abaixo) confirmar que quem está logado é admin. Some antes de qualquer

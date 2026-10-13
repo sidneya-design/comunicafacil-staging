@@ -84,7 +84,7 @@ function parseRemoteItems(items) {
 async function initAccess() {
     let session = null;
     try {
-        ({ supabase } = await import("./supabase.js?v=4"));
+        ({ supabase } = await import("./supabase.js?v=5"));
         ({ data: { session } } = await supabase.auth.getSession());
     } catch (error) {
         console.warn("Monte a Frase: não consegui falar com o Supabase:", error);
