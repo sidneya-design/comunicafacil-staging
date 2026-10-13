@@ -13,6 +13,66 @@ const AZURE_AI_AGENT_URL = "https://geniantis-org.services.ai.azure.com/api/proj
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+// Cache de áudio no servidor (bucket privado tts-cache, ver migration
+// 20261015000001): cada texto é gerado UMA vez por voz/velocidade e reaproveitado
+// por todos os usuários — o Google só cobra o que é novo. Qualquer falha no
+// cache só é registrada no log: o áudio é gerado e devolvido normalmente.
+const TTS_CACHE_BUCKET = "tts-cache";
+// Sobe quando mudar algo que altera o áudio gerado (velocidade, qualidade...):
+// os arquivos antigos deixam de ser usados e tudo é gerado de novo.
+const TTS_CACHE_VERSION = "v1";
+const storageAdmin = SERVICE_ROLE_KEY ? createClient(SUPABASE_URL, SERVICE_ROLE_KEY) : null;
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Caminho = serviço/voz/hash(velocidade|texto). O serviço e a voz entram no
+// caminho pra áudio do edge-tts (quando o Google falha) nunca ser servido como
+// se fosse da voz do Google, e vice-versa.
+async function ttsCachePath(provider: string, voice: string, text: string, ttsRate?: string): Promise<string> {
+  return `${TTS_CACHE_VERSION}/${provider}/${voice}/${await sha256Hex(`${ttsRate ?? ""}|${text}`)}.mp3`;
+}
+
+async function readTtsCache(path: string): Promise<string | null> {
+  if (!storageAdmin) return null;
+  try {
+    const { data, error } = await storageAdmin.storage.from(TTS_CACHE_BUCKET).download(path);
+    if (error || !data) return null;
+    return encodeBase64(new Uint8Array(await data.arrayBuffer()));
+  } catch (e) {
+    console.error("Cache de TTS (leitura) falhou:", (e as Error).message);
+    return null;
+  }
+}
+
+// Grava em segundo plano quando o runtime permite (EdgeRuntime.waitUntil): o
+// áudio volta pro usuário na hora e a gravação termina depois.
+function saveTtsCacheInBackground(path: string, audioBase64: string): Promise<void> {
+  const task = writeTtsCache(path, audioBase64);
+  // deno-lint-ignore no-explicit-any
+  const runtime = (globalThis as any).EdgeRuntime;
+  if (runtime?.waitUntil) {
+    runtime.waitUntil(task);
+    return Promise.resolve();
+  }
+  return task;
+}
+
+async function writeTtsCache(path: string, audioBase64: string): Promise<void> {
+  if (!storageAdmin) return;
+  try {
+    const bytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
+    const { error } = await storageAdmin.storage.from(TTS_CACHE_BUCKET)
+      .upload(path, bytes, { contentType: "audio/mpeg", upsert: true });
+    if (error) console.error("Cache de TTS (gravação) falhou:", error.message);
+  } catch (e) {
+    console.error("Cache de TTS (gravação) falhou:", (e as Error).message);
+  }
+}
 
 Deno.serve(async (req) => {
   // Trata requisições OPTIONS (CORS)
@@ -104,30 +164,44 @@ Deno.serve(async (req) => {
         // Qual serviço gerou o áudio — a aba "Voz do app" avisa quando não foi o
         // Google (sem chave/erro), senão as amostras soariam todas iguais.
         let provider = "google";
+        let cached = false;
+        const speechText = cleanTextForSpeech(ttsText);
         // 1º Google Cloud TTS, se o secret GOOGLE_TTS_API_KEY existir no projeto
-        // (vozes Chirp 3 HD dentro da cota grátis mensal); qualquer erro cai no
-        // edge-tts de sempre, então sem a chave nada muda.
+        // (vozes Chirp 3 HD); qualquer erro cai no edge-tts de sempre, então sem
+        // a chave nada muda. Cada serviço consulta o cache antes de gerar.
         const googleKey = Deno.env.get("GOOGLE_TTS_API_KEY");
         if (googleKey) {
-          try {
-            audioBase64 = await synthesizeTextWithGoogle(cleanTextForSpeech(ttsText), googleKey, ttsRate, ttsVoice);
-          } catch (googleError) {
-            console.error("Google TTS falhou, usando edge-tts:", (googleError as Error).message);
+          const googlePath = await ttsCachePath("google", resolveGoogleVoice(ttsVoice), speechText, ttsRate);
+          audioBase64 = await readTtsCache(googlePath);
+          cached = !!audioBase64;
+          if (!audioBase64) {
+            try {
+              audioBase64 = await synthesizeTextWithGoogle(speechText, googleKey, ttsRate, ttsVoice);
+              await saveTtsCacheInBackground(googlePath, audioBase64);
+            } catch (googleError) {
+              console.error("Google TTS falhou, usando edge-tts:", (googleError as Error).message);
+            }
           }
         }
         if (!audioBase64) {
           provider = "edge-tts";
-          try {
-            audioBase64 = encodeBase64(await edgeTtsSynthesize(cleanTextForSpeech(ttsText), undefined, ttsRate));
-          } catch (edgeError) {
-            console.error("edge-tts falhou, tentando Azure:", (edgeError as Error).message);
-            if (!apiKey) throw edgeError;
-            provider = "azure";
-            audioBase64 = await synthesizeTextWithAzure(ttsText, apiKey);
+          const edgePath = await ttsCachePath("edge-tts", "padrao", speechText, ttsRate);
+          audioBase64 = await readTtsCache(edgePath);
+          cached = !!audioBase64;
+          if (!audioBase64) {
+            try {
+              audioBase64 = encodeBase64(await edgeTtsSynthesize(speechText, undefined, ttsRate));
+              await saveTtsCacheInBackground(edgePath, audioBase64);
+            } catch (edgeError) {
+              console.error("edge-tts falhou, tentando Azure:", (edgeError as Error).message);
+              if (!apiKey) throw edgeError;
+              provider = "azure";
+              audioBase64 = await synthesizeTextWithAzure(ttsText, apiKey);
+            }
           }
         }
         return new Response(
-          JSON.stringify({ audio: audioBase64, provider }),
+          JSON.stringify({ audio: audioBase64, provider, cached }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
         );
       }
@@ -246,11 +320,15 @@ export function cleanTextForSpeech(text: string): string {
 // vozes de outras famílias (Studio etc., bem mais caras).
 const ALLOWED_GOOGLE_VOICE_RE = /^pt-BR-Chirp3-HD-[A-Za-z]+$/;
 
-async function synthesizeTextWithGoogle(text: string, apiKey: string, ttsRate?: string, requestedVoice?: string): Promise<string> {
-  // Voz pedida pelo app (se estiver na lista) → GOOGLE_TTS_VOICE → Kore.
-  const voiceName = (requestedVoice && ALLOWED_GOOGLE_VOICE_RE.test(requestedVoice))
+// Voz pedida pelo app (se for Chirp 3 HD pt-BR) → GOOGLE_TTS_VOICE → Kore.
+function resolveGoogleVoice(requestedVoice?: string): string {
+  return (requestedVoice && ALLOWED_GOOGLE_VOICE_RE.test(requestedVoice))
     ? requestedVoice
     : (Deno.env.get("GOOGLE_TTS_VOICE") || "pt-BR-Chirp3-HD-Kore");
+}
+
+async function synthesizeTextWithGoogle(text: string, apiKey: string, ttsRate?: string, requestedVoice?: string): Promise<string> {
+  const voiceName = resolveGoogleVoice(requestedVoice);
   // Os -15% de sempre foram calibrados pro edge-tts; as Chirp 3 HD já falam
   // pausado e, com eles, soavam arrastadas. Aqui o "-15%" padrão vira a
   // velocidade natural (1.0), e os ajustes da Leitura de Texto ("-25%" a
