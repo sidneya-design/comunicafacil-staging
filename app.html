@@ -1173,6 +1173,20 @@
                         </div>
                         <div id="admin-voice-feedback" class="admin-feedback" role="status" aria-live="polite" style="display:none;"></div>
                         <p class="media-hint tts-voice-usage" id="admin-voice-usage"></p>
+                        <div class="tts-pregen-box" id="admin-voice-pregen">
+                            <div class="tts-pregen-text">
+                                <strong>Gerar áudios de todo o conteúdo</strong>
+                                <span id="tts-pregen-summary">Gera de uma vez, na voz em uso, o áudio de cards, pastas e exercícios e guarda no servidor — assim ninguém espera a primeira vez de cada texto.</span>
+                            </div>
+                            <div class="tts-pregen-actions">
+                                <button type="button" class="btn-primary" id="btn-tts-pregen-start"><i class="fas fa-bolt" aria-hidden="true"></i> Gerar agora</button>
+                                <button type="button" class="btn-secondary" id="btn-tts-pregen-stop" style="display:none;">Parar</button>
+                            </div>
+                            <div class="tts-pregen-progress" id="tts-pregen-progress" style="display:none;">
+                                <div class="tts-pregen-bar"><div class="tts-pregen-fill" id="tts-pregen-fill"></div></div>
+                                <span id="tts-pregen-status"></span>
+                            </div>
+                        </div>
                         <div class="tts-voice-grid" id="admin-voice-list"></div>
                     </section>
 
@@ -2711,12 +2725,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=57">
+    <link rel="stylesheet" href="style.css?v=58">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=125"></script>
+    <script defer src="app.js?v=126"></script>
 </body>
 
 

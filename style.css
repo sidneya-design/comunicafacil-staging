@@ -4968,6 +4968,19 @@ button, .action-btn { touch-action: manipulation; }
 .tts-voice-column h3 { margin: 0 0 8px; font-size: 1rem; color: #1f2933; }
 .tts-voice-microsoft { grid-column: 1 / -1; }
 .tts-voice-usage { margin: 0 0 14px; }
+.tts-pregen-box {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-bottom: 16px;
+    padding: 14px 16px; background: #fff; border: 1px solid #e3e7ee; border-radius: 12px;
+}
+.tts-pregen-text { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 2px; }
+.tts-pregen-text strong { color: #1f2933; }
+.tts-pregen-text span { font-size: 0.9rem; color: #52514e; }
+.tts-pregen-actions { display: flex; gap: 8px; }
+.tts-pregen-actions button { border-radius: 8px; padding: 10px 16px; font-size: 14px; }
+.tts-pregen-progress { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; }
+.tts-pregen-bar { height: 8px; background: #eef1f5; border-radius: 4px; overflow: hidden; }
+.tts-pregen-fill { height: 100%; width: 0; background: #2196F3; transition: width .2s; }
+#tts-pregen-status { font-size: 0.9rem; color: #1f2933; }
 .tts-voice-list { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid #e3e7ee; border-radius: 12px; overflow: hidden; }
 .tts-voice-row { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid #f0f2f5; }
 .tts-voice-row:last-child { border-bottom: none; }

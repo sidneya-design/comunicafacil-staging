@@ -15031,6 +15031,142 @@ async function renderAdminVoiceUsage() {
             : `O app para de usar o Google em ${fmt(GOOGLE_APP_MONTHLY_LIMIT)}, pra nunca sair do grátis.`);
 }
 
+// ---- Pré-geração: cria de uma vez, no cache do servidor (tts-cache), o áudio
+// de todo o conteúdo na voz em uso. Pede cada texto EXATAMENTE como o app pede
+// na hora de tocar (senão a chave do cache não bate e o app gera de novo):
+//   * cards e pastas (Essenciais, Tópicos, Fomes e Forças): texto como está;
+//   * itens de exercício: sem a formatação (stripWordHtml), como o player;
+//   * Leitura de Texto: texto como está, na velocidade padrão do player ("1x").
+// Ficam de fora as falas montadas na hora (jogos, com nome do jogador) e as
+// frases fixas do Complete a Frase. Chama a função direto (sem o cache do
+// navegador, pra não lotar o localStorage); o que já está no servidor volta na
+// hora, então rodar de novo só gera o que falta.
+const TTS_PREGEN_CONCURRENCY = 5;
+let ttsPregenRunning = false;
+let ttsPregenStopRequested = false;
+
+async function fetchAllRows(table, columns) {
+    const pageSize = 1000;
+    let rows = [];
+    for (let from = 0; ; from += pageSize) {
+        const { data, error } = await supabaseClient.from(table).select(columns).order('id', { ascending: true }).range(from, from + pageSize - 1);
+        if (error || !data) break;
+        rows = rows.concat(data);
+        if (data.length < pageSize) break;
+    }
+    return rows;
+}
+
+async function collectPregenTexts() {
+    const jobs = new Map(); // "velocidade|texto" -> { text, ttsRate }
+    const add = (text, ttsRate = null) => {
+        const t = String(text || '').trim();
+        if (t) jobs.set(`${ttsRate || ''}|${t}`, { text: t, ttsRate });
+    };
+    const [coreCards, topics, topicItems, virtues, virtueItems, exercises, exerciseItems] = await Promise.all([
+        fetchAllRows('core_cards', 'id, word'),
+        fetchAllRows('topics', 'id, folder'),
+        fetchAllRows('topic_items', 'id, word'),
+        fetchAllRows('virtues', 'id, folder'),
+        fetchAllRows('virtue_items', 'id, word'),
+        fetchAllRows('exercises', 'id, game_kind'),
+        fetchAllExerciseItems()
+    ]);
+    coreCards.forEach(r => add(r.word));
+    topics.forEach(r => add(r.folder));
+    topicItems.forEach(r => add(r.word));
+    virtues.forEach(r => add(r.folder));
+    virtueItems.forEach(r => add(r.word));
+    const kindById = new Map(exercises.map(e => [e.id, e.game_kind]));
+    const readingTextRate = READING_TEXT_RATE_MAP['1'];
+    exerciseItems.forEach(item => {
+        if (kindById.get(item.exercise_id) === 'reading-text') add(item.word, readingTextRate);
+        else add(stripWordHtml(item.word || ''));
+    });
+    return [...jobs.values()];
+}
+
+function setTtsPregenStatus(text, fraction = null) {
+    document.getElementById('tts-pregen-progress').style.display = 'flex';
+    document.getElementById('tts-pregen-status').textContent = text;
+    if (fraction !== null) document.getElementById('tts-pregen-fill').style.width = `${Math.round(fraction * 100)}%`;
+}
+
+async function runTtsPregen() {
+    if (ttsPregenRunning || !supabaseClient) return;
+    ttsPregenRunning = true;
+    ttsPregenStopRequested = false;
+    const startBtn = document.getElementById('btn-tts-pregen-start');
+    const stopBtn = document.getElementById('btn-tts-pregen-stop');
+    startBtn.disabled = true;
+    stopBtn.style.display = '';
+    const voice = currentTtsVoice || MICROSOFT_TTS_VOICE.id;
+    const voiceLabel = (TTS_VOICE_OPTIONS.find(v => v.id === voice) || MICROSOFT_TTS_VOICE).label;
+    try {
+        setTtsPregenStatus('Levantando os textos do app…', 0);
+        const jobs = await collectPregenTexts();
+        const totalChars = jobs.reduce((sum, j) => sum + j.text.length, 0);
+        let done = 0, fromCache = 0, created = 0, failed = 0, fellBack = 0;
+        const headers = await getIaEndpointHeaders();
+        const update = () => setTtsPregenStatus(
+            `${voiceLabel}: ${done} de ${jobs.length} textos (${created} gerados agora, ${fromCache} já estavam salvos`
+            + (failed ? `, ${failed} com erro` : '') + ')', jobs.length ? done / jobs.length : 1);
+        update();
+        let next = 0;
+        const worker = async () => {
+            while (!ttsPregenStopRequested && next < jobs.length) {
+                const job = jobs[next++];
+                try {
+                    const body = { ttsText: job.text };
+                    if (job.ttsRate) body.ttsRate = job.ttsRate;
+                    if (currentTtsVoice) body.ttsVoice = currentTtsVoice;
+                    const response = await fetch(SUPABASE_CHAT_ENDPOINT, { method: 'POST', headers, body: JSON.stringify(body) });
+                    const data = await response.json();
+                    if (!response.ok || !data.audio) throw new Error(data.error || `HTTP ${response.status}`);
+                    if (data.cached) fromCache++; else created++;
+                    // Pediu voz do Google e veio da Microsoft (sem chave, erro ou
+                    // limite do mês): esse texto fica salvo na Microsoft, não no Google.
+                    if (voice !== MICROSOFT_TTS_VOICE.id && data.provider && data.provider !== 'google') fellBack++;
+                } catch (e) {
+                    failed++;
+                    console.warn('[Pré-geração] falhou:', job.text.slice(0, 40), e?.message || e);
+                }
+                done++;
+                update();
+            }
+        };
+        await Promise.all(Array.from({ length: TTS_PREGEN_CONCURRENCY }, worker));
+        const stopped = ttsPregenStopRequested && done < jobs.length;
+        setTtsPregenStatus(
+            (stopped ? `Parado em ${done} de ${jobs.length}. ` : `Pronto! ${jobs.length} textos (~${totalChars.toLocaleString('pt-BR')} caracteres). `)
+            + `${created} gerados agora, ${fromCache} já estavam salvos`
+            + (failed ? `, ${failed} com erro (rode de novo pra tentar só esses)` : '') + '.'
+            + (fellBack ? ` Atenção: ${fellBack} saíram na voz da Microsoft porque o Google não respondeu (chave ou limite do mês).` : ''),
+            jobs.length ? done / jobs.length : 1);
+        renderAdminVoiceUsage();
+    } catch (e) {
+        setTtsPregenStatus('Não foi possível gerar: ' + (e?.message || e));
+    } finally {
+        ttsPregenRunning = false;
+        startBtn.disabled = false;
+        stopBtn.style.display = 'none';
+    }
+}
+
+document.getElementById('btn-tts-pregen-start')?.addEventListener('click', () => {
+    const voice = currentTtsVoice || MICROSOFT_TTS_VOICE.id;
+    const voiceLabel = (TTS_VOICE_OPTIONS.find(v => v.id === voice) || MICROSOFT_TTS_VOICE).label;
+    const isGoogle = voice !== MICROSOFT_TTS_VOICE.id;
+    const msg = `Gerar o áudio de todo o conteúdo na voz ${voiceLabel}?`
+        + (isGoogle ? '\n\nConta na cota grátis do Google (o app para antes de passar dela). O que já estiver salvo não gera de novo.' : '\n\nA voz da Microsoft é grátis. O que já estiver salvo não gera de novo.')
+        + '\n\nLeva alguns minutos; deixe esta aba aberta.';
+    if (confirm(msg)) runTtsPregen();
+});
+document.getElementById('btn-tts-pregen-stop')?.addEventListener('click', () => {
+    ttsPregenStopRequested = true;
+    setTtsPregenStatus('Parando depois dos pedidos em andamento…');
+});
+
 async function playAdminVoiceSample(voice, button) {
     if (adminVoiceSampleAudio) { adminVoiceSampleAudio.pause(); adminVoiceSampleAudio = null; }
     if (adminVoiceSamplePlaying === voice.id) {
