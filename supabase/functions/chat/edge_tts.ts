@@ -8,6 +8,8 @@
 // WebSocketStream negocia HTTP/2, que este servidor rejeita), o handshake HTTP/1.1
 // e o framing WebSocket (RFC 6455) são feitos manualmente sobre Deno.connectTls.
 
+import { generateSecMsGecV2 } from "./edge_tts_drm.ts";
+
 const TRUSTED_CLIENT_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
 const CHROMIUM_FULL_VERSION = "143.0.3650.75";
 const HOST = "speech.platform.bing.com";
@@ -16,17 +18,10 @@ const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
   "Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0";
 
-// Sec-MS-GEC: SHA256(ticks do relógio do Windows arredondados p/ 5 min + token), hex maiúsculo.
-async function generateSecMsGec(): Promise<string> {
-  let ticks = Date.now() / 1000 + 11644473600; // epoch Unix -> epoch Windows (1601)
-  ticks -= ticks % 300; // janela de 5 minutos
-  ticks *= 1e7; // segundos -> intervalos de 100ns
-  const strToHash = `${ticks.toFixed(0)}${TRUSTED_CLIENT_TOKEN}`;
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(strToHash));
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-    .toUpperCase();
+// Sec-MS-GEC: desde out/2026 só o formato v2 é aceito (o SHA-256 simples de
+// antes leva 403) — ver edge_tts_drm.ts.
+function generateSecMsGec(): string {
+  return generateSecMsGecV2();
 }
 
 function jsDateString(): string {
@@ -124,10 +119,10 @@ export async function edgeTtsSynthesize(
   rate = "-15%",
   timeoutMs = 60000,
 ): Promise<Uint8Array> {
-  const secMsGec = await generateSecMsGec();
+  const secMsGec = generateSecMsGec();
   const query =
     `?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${secMsGec}` +
-    `&Sec-MS-GEC-Version=1-${CHROMIUM_FULL_VERSION}&ConnectionId=${randomHex(16)}`;
+    `&Sec-MS-GEC-Version=2-${CHROMIUM_FULL_VERSION}&ConnectionId=${randomHex(16)}`;
 
   const conn = await Deno.connectTls({
     hostname: HOST,
