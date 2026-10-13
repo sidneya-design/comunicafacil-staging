@@ -4827,6 +4827,7 @@ button, .action-btn { touch-action: manipulation; }
 @media (max-width: 640px) {
     .evolution-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .evolution-chart { height: 220px; }
+}
 
 /* =============================================
    ESPELHO — frase à esquerda, câmera sempre aberta à direita
