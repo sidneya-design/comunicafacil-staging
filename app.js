@@ -2177,7 +2177,7 @@ const azureTtsCache = new Map(); // texto -> Promise<{audio: string base64, word
 // pro destaque de palavra, removido por enquanto — ver getTtsAudio). Prefixo
 // novo pra não reler cache v3 no formato de objeto por engano; evictTtsLocalStorageCache
 // limpa todas as versões antigas.
-const TTS_STORAGE_PREFIX = 'comunica_tts_v4:';
+const TTS_STORAGE_PREFIX = 'comunica_tts_v5:'; // v5: voz do Google na velocidade natural
 // Teto de entradas de áudio no localStorage (~16KB cada → ~2,5MB). Sem teto o
 // cache enchia a quota (~5MB) e o token de sessão do Supabase deixava de ser
 // salvo, causando loop de login. Ao passar do teto, remove um lote das mais
@@ -2218,10 +2218,26 @@ async function getIaEndpointHeaders() {
     return headers;
 }
 
+// Áudios de versões anteriores do cache (prefixos antigos) só ocupariam espaço
+// no localStorage — e localStorage lotado já derrubou o login uma vez.
+(function removeOldTtsCacheVersions() {
+    try {
+        const oldPrefixes = ['comunica_tts_v4:', 'comunica_tts_v1:', 'comunica_tts_voice'];
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && oldPrefixes.some(prefix => key.startsWith(prefix))) keys.push(key);
+        }
+        keys.forEach(k => localStorage.removeItem(k));
+    } catch (e) { /* localStorage indisponível: nada a fazer */ }
+})();
+
 // Voz do app (aba "Voz do app" no admin, app_settings 'tts_voice'). Fica
 // também no localStorage pra o Complete a Frase e o Monte a Frase (páginas
 // próprias no mesmo domínio) usarem a mesma voz. Nula = voz padrão da função.
-const TTS_VOICE_STORAGE_KEY = 'comunica_tts_voice';
+// A chave NÃO começa com "comunica_tts_": a limpeza do cache de áudio apaga
+// tudo com esse prefixo e levaria a voz junto.
+const TTS_VOICE_STORAGE_KEY = 'comunica_voz_do_app';
 // Todas as vozes Chirp 3 HD em pt-BR do Google (as mais naturais), por gênero.
 const TTS_VOICE_OPTIONS = [
     { id: 'pt-BR-Chirp3-HD-Achernar', label: 'Achernar', gender: 'Feminina' },

@@ -271,9 +271,9 @@ try {
 } catch (error) { /* sem armazenamento: fica no Normal */ }
 
 // Voz escolhida no admin ("Voz do app"): o app grava no localStorage
-// (comunica_tts_voice), e esta página, no mesmo domínio, usa a mesma voz.
+// (comunica_voz_do_app), e esta página, no mesmo domínio, usa a mesma voz.
 function currentTtsVoice() {
-    try { return localStorage.getItem("comunica_tts_voice") || null; } catch (error) { return null; }
+    try { return localStorage.getItem("comunica_voz_do_app") || null; } catch (error) { return null; }
 }
 
 async function fetchTtsAudio(endpoint, text) {

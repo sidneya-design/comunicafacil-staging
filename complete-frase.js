@@ -240,7 +240,7 @@ async function loadRemoteCustomQuestions() {
 }
 
 const LOCAL_TTS_ENDPOINT = "http://127.0.0.1:5001/chat";
-const TTS_STORAGE_PREFIX = "comunica_tts_v1:";
+const TTS_STORAGE_PREFIX = "comunica_tts_v2:"; // v2: voz do Google na velocidade natural
 const ttsCache = new Map();
 let currentAudio = null;
 let availableVoices = [];
@@ -273,9 +273,9 @@ function speakNative(text) {
 }
 
 // Voz escolhida no admin ("Voz do app"): o app grava no localStorage
-// (comunica_tts_voice), e esta página, no mesmo domínio, usa a mesma voz.
+// (comunica_voz_do_app), e esta página, no mesmo domínio, usa a mesma voz.
 function currentTtsVoice() {
-    try { return localStorage.getItem("comunica_tts_voice") || null; } catch (error) { return null; }
+    try { return localStorage.getItem("comunica_voz_do_app") || null; } catch (error) { return null; }
 }
 
 async function fetchTtsAudio(endpoint, text) {

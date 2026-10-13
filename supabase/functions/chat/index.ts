@@ -251,8 +251,12 @@ async function synthesizeTextWithGoogle(text: string, apiKey: string, ttsRate?: 
   const voiceName = (requestedVoice && ALLOWED_GOOGLE_VOICE_RE.test(requestedVoice))
     ? requestedVoice
     : (Deno.env.get("GOOGLE_TTS_VOICE") || "pt-BR-Chirp3-HD-Kore");
+  // Os -15% de sempre foram calibrados pro edge-tts; as Chirp 3 HD já falam
+  // pausado e, com eles, soavam arrastadas. Aqui o "-15%" padrão vira a
+  // velocidade natural (1.0), e os ajustes da Leitura de Texto ("-25%" a
+  // "+5%") ficam relativos a ela: -20% → 0.95, +5% → 1.2.
   const ratePercent = Number.parseFloat(String(ttsRate ?? "-15%").replace("%", ""));
-  const speakingRate = Number.isFinite(ratePercent) ? Math.min(2, Math.max(0.25, 1 + ratePercent / 100)) : 0.85;
+  const speakingRate = Number.isFinite(ratePercent) ? Math.min(2, Math.max(0.25, 1 + (ratePercent + 15) / 100)) : 1;
 
   const request = async (withRate: boolean) => fetch("https://texttospeech.googleapis.com/v1/text:synthesize", {
     method: "POST",
