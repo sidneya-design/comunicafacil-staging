@@ -7786,6 +7786,12 @@ function renderMirrorPhrase() {
     if (mirrorIndex >= total) mirrorIndex = Math.max(0, total - 1);
     const item = mirrorPhrases[mirrorIndex];
     phraseEl.innerHTML = item ? item.html : '';
+    // Mesmo padrão do player de Sílabas/Slides (renderCurrentPlaylistItem):
+    // pré-carrega a voz da frase atual e da próxima, pra o 🔊 responder na hora
+    // em vez de esperar o servidor gerar o áudio no clique.
+    if (item) prefetchTts(item.text);
+    const nextItem = mirrorPhrases[mirrorIndex + 1];
+    if (nextItem) prefetchTts(nextItem.text);
     document.getElementById('mirror-progress').textContent = total ? `${mirrorIndex + 1} / ${total}` : '0 / 0';
     document.getElementById('btn-mirror-prev').disabled = mirrorIndex === 0;
     document.getElementById('btn-mirror-next').disabled = mirrorIndex >= total - 1;
