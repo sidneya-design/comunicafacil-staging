@@ -241,20 +241,14 @@ export function cleanTextForSpeech(text: string): string {
 // formato do SSML ("-15%", "+10%"); sem ele, -15% como no edge-tts, pra manter
 // o ritmo mais calmo de sempre.
 // Vozes que o app pode pedir (seletor "Voz do app" no admin, app_settings
-// 'tts_voice'). Lista fixa de propósito: sem ela, qualquer usuário logado
-// poderia usar a chave do Google pra gerar qualquer voz.
-const ALLOWED_GOOGLE_VOICES = new Set([
-  "pt-BR-Chirp3-HD-Kore",
-  "pt-BR-Chirp3-HD-Aoede",
-  "pt-BR-Chirp3-HD-Leda",
-  "pt-BR-Chirp3-HD-Charon",
-  "pt-BR-Chirp3-HD-Puck",
-  "pt-BR-Chirp3-HD-Orus",
-]);
+// 'tts_voice'): só a família Chirp 3 HD em pt-BR. Formato fixo de propósito:
+// sem ele, qualquer usuário logado poderia usar a chave do Google pra gerar
+// vozes de outras famílias (Studio etc., bem mais caras).
+const ALLOWED_GOOGLE_VOICE_RE = /^pt-BR-Chirp3-HD-[A-Za-z]+$/;
 
 async function synthesizeTextWithGoogle(text: string, apiKey: string, ttsRate?: string, requestedVoice?: string): Promise<string> {
   // Voz pedida pelo app (se estiver na lista) → GOOGLE_TTS_VOICE → Kore.
-  const voiceName = (requestedVoice && ALLOWED_GOOGLE_VOICES.has(requestedVoice))
+  const voiceName = (requestedVoice && ALLOWED_GOOGLE_VOICE_RE.test(requestedVoice))
     ? requestedVoice
     : (Deno.env.get("GOOGLE_TTS_VOICE") || "pt-BR-Chirp3-HD-Kore");
   const ratePercent = Number.parseFloat(String(ttsRate ?? "-15%").replace("%", ""));

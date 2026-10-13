@@ -4963,15 +4963,27 @@ button, .action-btn { touch-action: manipulation; }
     .mirror-left { height: auto; width: 100%; }
 }
 
-/* Aba "Voz do app" (admin): uma linha por voz, com amostra e "Usar esta voz" */
-.tts-voice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-.tts-voice-card {
-    display: flex; align-items: center; gap: 10px; padding: 14px 16px;
-    background: #fff; border: 2px solid #e3e7ee; border-radius: 12px;
+/* Aba "Voz do app" (admin): lista compacta em duas colunas (Femininas / Masculinas) */
+.tts-voice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.tts-voice-column h3 { margin: 0 0 8px; font-size: 1rem; color: #1f2933; }
+.tts-voice-list { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid #e3e7ee; border-radius: 12px; overflow: hidden; }
+.tts-voice-row { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid #f0f2f5; }
+.tts-voice-row:last-child { border-bottom: none; }
+.tts-voice-row.is-active { background: #eef6ff; }
+.tts-voice-name { flex: 1; min-width: 0; font-weight: 600; color: #1f2933; }
+.tts-voice-sample {
+    width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 50%; cursor: pointer;
+    background: rgba(33, 150, 243, 0.12); color: #1976d2; font-size: 12px;
 }
-.tts-voice-card.is-active { border-color: #2196F3; background: #f3f9ff; }
-.tts-voice-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.tts-voice-info strong { font-size: 1.05rem; color: #1f2933; }
-.tts-voice-info span { font-size: 0.85rem; color: #52514e; }
-.tts-voice-card .tts-voice-sample, .tts-voice-card .tts-voice-use { padding: 8px 12px; font-size: 14px; border-radius: 8px; white-space: nowrap; }
-.tts-voice-card .tts-voice-use:disabled { opacity: .6; cursor: default; }
+.tts-voice-sample:hover { background: rgba(33, 150, 243, 0.25); }
+.tts-voice-sample.is-playing { background: #1976d2; color: #fff; }
+.tts-voice-sample:disabled { opacity: .6; cursor: default; }
+.tts-voice-use {
+    border: 1px solid #2196F3; background: #fff; color: #1976d2; border-radius: 8px;
+    padding: 4px 12px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.tts-voice-use:hover { background: #2196F3; color: #fff; }
+.tts-voice-badge { background: #2196F3; color: #fff; border-radius: 8px; padding: 4px 10px; font-size: 13px; font-weight: 700; }
+@media (max-width: 768px) {
+    .tts-voice-grid { grid-template-columns: 1fr; }
+}

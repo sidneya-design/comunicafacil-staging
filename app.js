@@ -2222,13 +2222,38 @@ async function getIaEndpointHeaders() {
 // também no localStorage pra o Complete a Frase e o Monte a Frase (páginas
 // próprias no mesmo domínio) usarem a mesma voz. Nula = voz padrão da função.
 const TTS_VOICE_STORAGE_KEY = 'comunica_tts_voice';
+// Todas as vozes Chirp 3 HD em pt-BR do Google (as mais naturais), por gênero.
 const TTS_VOICE_OPTIONS = [
-    { id: 'pt-BR-Chirp3-HD-Kore', label: 'Kore', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Achernar', label: 'Achernar', gender: 'Feminina' },
     { id: 'pt-BR-Chirp3-HD-Aoede', label: 'Aoede', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Autonoe', label: 'Autonoe', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Callirrhoe', label: 'Callirrhoe', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Despina', label: 'Despina', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Erinome', label: 'Erinome', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Gacrux', label: 'Gacrux', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Kore', label: 'Kore', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Laomedeia', label: 'Laomedeia', gender: 'Feminina' },
     { id: 'pt-BR-Chirp3-HD-Leda', label: 'Leda', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Pulcherrima', label: 'Pulcherrima', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Sulafat', label: 'Sulafat', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Vindemiatrix', label: 'Vindemiatrix', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Zephyr', label: 'Zephyr', gender: 'Feminina' },
+    { id: 'pt-BR-Chirp3-HD-Achird', label: 'Achird', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Algenib', label: 'Algenib', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Algieba', label: 'Algieba', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Alnilam', label: 'Alnilam', gender: 'Masculina' },
     { id: 'pt-BR-Chirp3-HD-Charon', label: 'Charon', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Enceladus', label: 'Enceladus', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Fenrir', label: 'Fenrir', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Iapetus', label: 'Iapetus', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Orus', label: 'Orus', gender: 'Masculina' },
     { id: 'pt-BR-Chirp3-HD-Puck', label: 'Puck', gender: 'Masculina' },
-    { id: 'pt-BR-Chirp3-HD-Orus', label: 'Orus', gender: 'Masculina' }
+    { id: 'pt-BR-Chirp3-HD-Rasalgethi', label: 'Rasalgethi', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Sadachbia', label: 'Sadachbia', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Sadaltager', label: 'Sadaltager', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Schedar', label: 'Schedar', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Umbriel', label: 'Umbriel', gender: 'Masculina' },
+    { id: 'pt-BR-Chirp3-HD-Zubenelgenubi', label: 'Zubenelgenubi', gender: 'Masculina' }
 ];
 let currentTtsVoice = (() => {
     try { return localStorage.getItem(TTS_VOICE_STORAGE_KEY) || null; } catch (e) { return null; }
@@ -14900,37 +14925,58 @@ function renderAdminVoicePanel() {
     if (!list) return;
     list.innerHTML = '';
     // Sem voz escolhida ainda, a função usa a Kore (padrão) — mostra ela como a atual.
-    const activeVoice = currentTtsVoice || TTS_VOICE_OPTIONS[0].id;
-    TTS_VOICE_OPTIONS.forEach(voice => {
-        const isActive = voice.id === activeVoice;
-        const card = document.createElement('div');
-        card.className = 'tts-voice-card' + (isActive ? ' is-active' : '');
+    const activeVoice = currentTtsVoice || 'pt-BR-Chirp3-HD-Kore';
 
-        const info = document.createElement('div');
-        info.className = 'tts-voice-info';
-        info.innerHTML = `<strong></strong><span></span>`;
-        info.querySelector('strong').textContent = voice.label;
-        info.querySelector('span').textContent = voice.gender + (isActive ? ' · em uso' : '');
+    // Lista compacta em duas colunas (Femininas / Masculinas): 30 vozes em cards
+    // não cabiam na tela.
+    ['Feminina', 'Masculina'].forEach(gender => {
+        const column = document.createElement('section');
+        column.className = 'tts-voice-column';
+        const voices = TTS_VOICE_OPTIONS.filter(v => v.gender === gender);
+        const heading = document.createElement('h3');
+        heading.textContent = `${gender === 'Feminina' ? 'Femininas' : 'Masculinas'} (${voices.length})`;
+        const ul = document.createElement('ul');
+        ul.className = 'tts-voice-list';
 
-        const sampleBtn = document.createElement('button');
-        sampleBtn.type = 'button';
-        sampleBtn.className = 'btn-secondary tts-voice-sample';
-        const isPlaying = adminVoiceSamplePlaying === voice.id;
-        sampleBtn.innerHTML = isPlaying
-            ? '<i class="fas fa-stop" aria-hidden="true"></i> Parar'
-            : '<i class="fas fa-play" aria-hidden="true"></i> Ouvir';
-        sampleBtn.setAttribute('aria-label', `${isPlaying ? 'Parar' : 'Ouvir'} amostra da voz ${voice.label}`);
-        sampleBtn.addEventListener('click', () => playAdminVoiceSample(voice, sampleBtn));
+        voices.forEach(voice => {
+            const isActive = voice.id === activeVoice;
+            const isPlaying = adminVoiceSamplePlaying === voice.id;
+            const li = document.createElement('li');
+            li.className = 'tts-voice-row' + (isActive ? ' is-active' : '');
 
-        const useBtn = document.createElement('button');
-        useBtn.type = 'button';
-        useBtn.className = 'btn-primary tts-voice-use';
-        useBtn.textContent = isActive ? 'Em uso' : 'Usar esta voz';
-        useBtn.disabled = isActive;
-        useBtn.addEventListener('click', () => saveTtsVoiceSetting(voice));
+            const sampleBtn = document.createElement('button');
+            sampleBtn.type = 'button';
+            sampleBtn.className = 'tts-voice-sample' + (isPlaying ? ' is-playing' : '');
+            sampleBtn.innerHTML = isPlaying
+                ? '<i class="fas fa-stop" aria-hidden="true"></i>'
+                : '<i class="fas fa-play" aria-hidden="true"></i>';
+            sampleBtn.title = isPlaying ? 'Parar' : 'Ouvir amostra';
+            sampleBtn.setAttribute('aria-label', `${isPlaying ? 'Parar' : 'Ouvir'} amostra da voz ${voice.label}`);
+            sampleBtn.addEventListener('click', () => playAdminVoiceSample(voice, sampleBtn));
 
-        card.append(info, sampleBtn, useBtn);
-        list.appendChild(card);
+            const name = document.createElement('span');
+            name.className = 'tts-voice-name';
+            name.textContent = voice.label;
+
+            li.append(sampleBtn, name);
+            if (isActive) {
+                const badge = document.createElement('span');
+                badge.className = 'tts-voice-badge';
+                badge.textContent = 'Em uso';
+                li.appendChild(badge);
+            } else {
+                const useBtn = document.createElement('button');
+                useBtn.type = 'button';
+                useBtn.className = 'tts-voice-use';
+                useBtn.textContent = 'Usar';
+                useBtn.setAttribute('aria-label', `Usar a voz ${voice.label} no app`);
+                useBtn.addEventListener('click', () => saveTtsVoiceSetting(voice));
+                li.appendChild(useBtn);
+            }
+            ul.appendChild(li);
+        });
+        column.append(heading, ul);
+        list.appendChild(column);
     });
 }
 
@@ -14943,7 +14989,7 @@ async function playAdminVoiceSample(voice, button) {
     }
     adminVoiceSamplePlaying = voice.id;
     button.disabled = true;
-    button.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Carregando';
+    button.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>';
     try {
         // Direto na função da nuvem (sem cache): o servidor local de
         // desenvolvimento não usa o Google e tocaria sempre a mesma voz.
