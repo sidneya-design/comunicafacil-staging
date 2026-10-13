@@ -4968,6 +4968,10 @@ button, .action-btn { touch-action: manipulation; }
 .tts-voice-column h3 { margin: 0 0 8px; font-size: 1rem; color: #1f2933; }
 .tts-voice-microsoft { grid-column: 1 / -1; }
 .tts-voice-usage { margin: 0 0 14px; }
+.tts-voice-release { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: #52514e; cursor: pointer; white-space: nowrap; }
+.tts-voice-release input { width: 16px; height: 16px; accent-color: #2196F3; cursor: pointer; }
+.profile-voice { margin: 16px 0 8px; }
+.profile-voice h3 { margin: 0 0 8px; font-size: 1rem; color: #1f2933; }
 .tts-pregen-box {
     display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-bottom: 16px;
     padding: 14px 16px; background: #fff; border: 1px solid #e3e7ee; border-radius: 12px;

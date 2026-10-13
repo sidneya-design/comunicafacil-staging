@@ -2291,11 +2291,43 @@ function setCurrentTtsVoice(voice) {
     azureTtsCache.clear();
 }
 
+// Vozes do app (aba "Voz do app" no admin, app_settings):
+//   * 'tts_voice': a voz padrão (nula = Francisca, da Microsoft);
+//   * 'tts_voices': até 3 vozes liberadas, separadas por vírgula, pra cada
+//     pessoa escolher no "Meu perfil" (user_metadata.tts_voice).
+// Cada um ouve a voz que escolheu, se ainda estiver liberada; senão, a padrão.
+const MAX_RELEASED_TTS_VOICES = 3;
+let appDefaultTtsVoice = null;
+let appReleasedTtsVoices = [];
+let userTtsVoicePreference = null;
+
+function releasedTtsVoiceIds() {
+    const defaultId = appDefaultTtsVoice || 'microsoft-francisca';
+    const ids = appReleasedTtsVoices.length ? [...appReleasedTtsVoices] : [defaultId];
+    if (!ids.includes(defaultId)) ids.unshift(defaultId);
+    return ids.slice(0, MAX_RELEASED_TTS_VOICES);
+}
+
+function applyEffectiveTtsVoice() {
+    const released = releasedTtsVoiceIds();
+    const chosen = userTtsVoicePreference && released.includes(userTtsVoicePreference)
+        ? userTtsVoicePreference
+        : (appDefaultTtsVoice || 'microsoft-francisca');
+    // Francisca = sem voz no pedido (a função usa a Microsoft), como sempre foi.
+    setCurrentTtsVoice(chosen === 'microsoft-francisca' ? null : chosen);
+}
+
 async function loadTtsVoiceSetting() {
     if (!supabaseClient) return;
     try {
-        const { data, error } = await supabaseClient.from('app_settings').select('value').eq('key', 'tts_voice').maybeSingle();
-        if (!error) setCurrentTtsVoice(data?.value || null);
+        const { data, error } = await supabaseClient.from('app_settings').select('key, value').in('key', ['tts_voice', 'tts_voices']);
+        if (error) return; // mantém a voz que já estava
+        const byKey = Object.fromEntries((data || []).map(r => [r.key, r.value]));
+        appDefaultTtsVoice = byKey.tts_voice || null;
+        appReleasedTtsVoices = String(byKey.tts_voices || '').split(',').map(v => v.trim()).filter(Boolean);
+        const { data: sessionData } = await supabaseClient.auth.getSession();
+        userTtsVoicePreference = sessionData?.session?.user?.user_metadata?.tts_voice || null;
+        applyEffectiveTtsVoice();
     } catch (e) { /* mantém a voz que já estava */ }
 }
 
@@ -14212,8 +14244,98 @@ document.getElementById('btn-user-profile')?.addEventListener('click', () => {
     setProfileStatus('profile-password-done', '');
     showProfilePasswordForm(false);
     refreshUserAvatar();
+    setProfileStatus('profile-voice-status', '');
+    renderProfileVoices();
     profileModal.style.display = 'flex';
 });
+
+// ---- Voz que lê o app (Meu perfil): cada pessoa escolhe entre as vozes
+// liberadas pelo admin; fica em user_metadata.tts_voice (vale em qualquer
+// aparelho). Some quando só há uma voz liberada.
+let profileVoiceSampleAudio = null;
+let profileVoiceSamplePlaying = null;
+
+function renderProfileVoices() {
+    const section = document.getElementById('profile-voice-section');
+    const list = document.getElementById('profile-voice-list');
+    if (!section || !list) return;
+    const released = releasedTtsVoiceIds();
+    section.hidden = released.length < 2;
+    list.innerHTML = '';
+    const current = userTtsVoicePreference && released.includes(userTtsVoicePreference)
+        ? userTtsVoicePreference
+        : (appDefaultTtsVoice || MICROSOFT_TTS_VOICE.id);
+    released.forEach(id => {
+        const voice = TTS_VOICE_OPTIONS.find(v => v.id === id) || MICROSOFT_TTS_VOICE;
+        const isCurrent = id === current;
+        const isPlaying = profileVoiceSamplePlaying === id;
+        const li = document.createElement('li');
+        li.className = 'tts-voice-row' + (isCurrent ? ' is-active' : '');
+
+        const sampleBtn = document.createElement('button');
+        sampleBtn.type = 'button';
+        sampleBtn.className = 'tts-voice-sample' + (isPlaying ? ' is-playing' : '');
+        sampleBtn.innerHTML = isPlaying ? '<i class="fas fa-stop" aria-hidden="true"></i>' : '<i class="fas fa-play" aria-hidden="true"></i>';
+        sampleBtn.setAttribute('aria-label', `${isPlaying ? 'Parar' : 'Ouvir'} a voz ${voice.label}`);
+        sampleBtn.addEventListener('click', () => playProfileVoiceSample(id, sampleBtn));
+
+        const name = document.createElement('span');
+        name.className = 'tts-voice-name';
+        name.textContent = voice.label + (id === (appDefaultTtsVoice || MICROSOFT_TTS_VOICE.id) ? ' (padrão)' : '');
+
+        li.append(sampleBtn, name);
+        if (isCurrent) {
+            const badge = document.createElement('span');
+            badge.className = 'tts-voice-badge';
+            badge.textContent = 'Em uso';
+            li.appendChild(badge);
+        } else {
+            const useBtn = document.createElement('button');
+            useBtn.type = 'button';
+            useBtn.className = 'tts-voice-use';
+            useBtn.textContent = 'Usar';
+            useBtn.setAttribute('aria-label', `Usar a voz ${voice.label}`);
+            useBtn.addEventListener('click', () => saveProfileVoice(id, voice.label));
+            li.appendChild(useBtn);
+        }
+        list.appendChild(li);
+    });
+}
+
+async function playProfileVoiceSample(id, button) {
+    if (profileVoiceSampleAudio) { profileVoiceSampleAudio.pause(); profileVoiceSampleAudio = null; }
+    if (profileVoiceSamplePlaying === id) { profileVoiceSamplePlaying = null; renderProfileVoices(); return; }
+    profileVoiceSamplePlaying = id;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>';
+    try {
+        // Mesma frase da amostra do admin: já fica salva no servidor por voz.
+        const audioBase64 = await fetchTtsAudio(SUPABASE_CHAT_ENDPOINT, TTS_VOICE_SAMPLE_TEXT, null,
+            id === MICROSOFT_TTS_VOICE.id ? null : id);
+        if (profileVoiceSamplePlaying !== id) return;
+        profileVoiceSampleAudio = new Audio('data:audio/mp3;base64,' + audioBase64);
+        profileVoiceSampleAudio.onended = () => { profileVoiceSamplePlaying = null; renderProfileVoices(); };
+        renderProfileVoices();
+        await profileVoiceSampleAudio.play();
+    } catch (e) {
+        profileVoiceSamplePlaying = null;
+        renderProfileVoices();
+        setProfileStatus('profile-voice-status', 'Não foi possível tocar a amostra.', true);
+    }
+}
+
+async function saveProfileVoice(id, label) {
+    if (!supabaseClient) return;
+    const { error } = await supabaseClient.auth.updateUser({ data: { tts_voice: id } });
+    if (error) {
+        setProfileStatus('profile-voice-status', 'Não foi possível salvar a voz: ' + error.message, true);
+        return;
+    }
+    userTtsVoicePreference = id;
+    applyEffectiveTtsVoice();
+    setProfileStatus('profile-voice-status', `Pronto! O app passa a falar com a voz ${label}.`);
+    renderProfileVoices();
+}
 
 // Nome editável no Meu perfil (o e-mail não). Grava no nome da conta
 // (user_metadata.full_name) e, se for paciente, também em patients.name —
@@ -14945,8 +15067,11 @@ function renderAdminVoicePanel() {
     const list = document.getElementById('admin-voice-list');
     if (!list) return;
     list.innerHTML = '';
-    // Sem voz escolhida, o app usa a voz da Microsoft (a de sempre).
-    const activeVoice = currentTtsVoice || MICROSOFT_TTS_VOICE.id;
+    const releasedCount = document.getElementById('admin-voice-released-count');
+    if (releasedCount) {
+        const labels = releasedTtsVoiceIds().map(id => ttsVoiceLabel(id));
+        releasedCount.textContent = `Liberadas (${labels.length} de ${MAX_RELEASED_TTS_VOICES}): ${labels.join(', ')}. Cada pessoa escolhe a sua no Meu perfil; quem não escolher ouve a padrão.`;
+    }
 
     // Voz atual do app (Microsoft) primeiro, numa linha própria; depois as 30
     // do Google em duas colunas (Femininas / Masculinas).
@@ -14956,7 +15081,7 @@ function renderAdminVoicePanel() {
     microsoftHeading.textContent = 'Voz atual do app (Microsoft)';
     const microsoftList = document.createElement('ul');
     microsoftList.className = 'tts-voice-list';
-    microsoftList.appendChild(buildAdminVoiceRow(MICROSOFT_TTS_VOICE, activeVoice));
+    microsoftList.appendChild(buildAdminVoiceRow(MICROSOFT_TTS_VOICE));
     microsoftSection.append(microsoftHeading, microsoftList);
     list.appendChild(microsoftSection);
 
@@ -14969,17 +15094,19 @@ function renderAdminVoicePanel() {
         const ul = document.createElement('ul');
         ul.className = 'tts-voice-list';
 
-        voices.forEach(voice => ul.appendChild(buildAdminVoiceRow(voice, activeVoice)));
+        voices.forEach(voice => ul.appendChild(buildAdminVoiceRow(voice)));
         column.append(heading, ul);
         list.appendChild(column);
     });
 }
 
-function buildAdminVoiceRow(voice, activeVoice) {
-    const isActive = voice.id === activeVoice;
+function buildAdminVoiceRow(voice) {
+    const released = releasedTtsVoiceIds();
+    const isDefault = voice.id === (appDefaultTtsVoice || MICROSOFT_TTS_VOICE.id);
+    const isReleased = released.includes(voice.id);
     const isPlaying = adminVoiceSamplePlaying === voice.id;
     const li = document.createElement('li');
-    li.className = 'tts-voice-row' + (isActive ? ' is-active' : '');
+    li.className = 'tts-voice-row' + (isReleased ? ' is-active' : '');
 
     const sampleBtn = document.createElement('button');
     sampleBtn.type = 'button';
@@ -14995,22 +15122,66 @@ function buildAdminVoiceRow(voice, activeVoice) {
     name.className = 'tts-voice-name';
     name.textContent = voice.label;
 
-    li.append(sampleBtn, name);
-    if (isActive) {
+    // "Liberada": aparece pra todos escolherem no Meu perfil (até 3).
+    const releaseLabel = document.createElement('label');
+    releaseLabel.className = 'tts-voice-release';
+    const releaseBox = document.createElement('input');
+    releaseBox.type = 'checkbox';
+    releaseBox.checked = isReleased;
+    releaseBox.disabled = isDefault; // a padrão é sempre liberada
+    releaseBox.addEventListener('change', () => toggleReleasedTtsVoice(voice, releaseBox.checked, releaseBox));
+    releaseLabel.append(releaseBox, document.createTextNode(' Liberada'));
+    releaseLabel.title = isDefault ? 'A voz padrão fica sempre liberada' : 'Liberar para os usuários escolherem no Meu perfil';
+
+    li.append(sampleBtn, name, releaseLabel);
+    if (isDefault) {
         const badge = document.createElement('span');
         badge.className = 'tts-voice-badge';
-        badge.textContent = 'Em uso';
+        badge.textContent = 'Padrão';
         li.appendChild(badge);
     } else {
         const useBtn = document.createElement('button');
         useBtn.type = 'button';
         useBtn.className = 'tts-voice-use';
-        useBtn.textContent = 'Usar';
-        useBtn.setAttribute('aria-label', `Usar a voz ${voice.label} no app`);
+        useBtn.textContent = 'Tornar padrão';
+        useBtn.setAttribute('aria-label', `Tornar ${voice.label} a voz padrão do app`);
         useBtn.addEventListener('click', () => saveTtsVoiceSetting(voice));
         li.appendChild(useBtn);
     }
     return li;
+}
+
+async function saveAppSetting(key, value) {
+    const { error } = await supabaseClient.from('app_settings').upsert({
+        key, value, updated_at: new Date().toISOString(), updated_by: currentUserId
+    });
+    return error;
+}
+
+async function toggleReleasedTtsVoice(voice, release, checkbox) {
+    let ids = releasedTtsVoiceIds();
+    if (release) {
+        if (ids.length >= MAX_RELEASED_TTS_VOICES) {
+            checkbox.checked = false;
+            showAdminVoiceFeedback(`Dá pra liberar até ${MAX_RELEASED_TTS_VOICES} vozes. Desmarque uma antes de liberar outra.`, true);
+            return;
+        }
+        ids = [...ids, voice.id];
+    } else {
+        ids = ids.filter(id => id !== voice.id);
+    }
+    const error = await saveAppSetting('tts_voices', ids.join(','));
+    if (error) {
+        checkbox.checked = !release;
+        showAdminVoiceFeedback('Não foi possível salvar: ' + error.message, true);
+        return;
+    }
+    appReleasedTtsVoices = ids;
+    applyEffectiveTtsVoice();
+    showAdminVoiceFeedback(release
+        ? `${voice.label} liberada: os usuários já podem escolher essa voz no Meu perfil. Use "Gerar agora" pra deixar o conteúdo pronto nela.`
+        : `${voice.label} não está mais liberada. Quem tinha escolhido ela volta pra voz padrão.`);
+    renderAdminVoicePanel();
 }
 
 // Consumo do Google no mês (tts_usage, gravado pela função chat): a cota
@@ -15100,12 +15271,14 @@ async function runTtsPregen() {
     const stopBtn = document.getElementById('btn-tts-pregen-stop');
     startBtn.disabled = true;
     stopBtn.style.display = '';
-    const voice = currentTtsVoice || MICROSOFT_TTS_VOICE.id;
-    const voiceLabel = (TTS_VOICE_OPTIONS.find(v => v.id === voice) || MICROSOFT_TTS_VOICE).label;
+    // Gera em todas as vozes liberadas (cada pessoa pode ter escolhido uma).
+    const voices = releasedTtsVoiceIds();
+    const voiceLabel = voices.map(ttsVoiceLabel).join(', ');
     try {
         setTtsPregenStatus('Levantando os textos do app…', 0);
-        const jobs = await collectPregenTexts();
-        const totalChars = jobs.reduce((sum, j) => sum + j.text.length, 0);
+        const texts = await collectPregenTexts();
+        const jobs = voices.flatMap(voice => texts.map(t => ({ ...t, voice })));
+        const totalChars = texts.reduce((sum, j) => sum + j.text.length, 0);
         let done = 0, fromCache = 0, created = 0, failed = 0, fellBack = 0;
         const headers = await getIaEndpointHeaders();
         const update = () => setTtsPregenStatus(
@@ -15119,14 +15292,14 @@ async function runTtsPregen() {
                 try {
                     const body = { ttsText: job.text };
                     if (job.ttsRate) body.ttsRate = job.ttsRate;
-                    if (currentTtsVoice) body.ttsVoice = currentTtsVoice;
+                    if (job.voice !== MICROSOFT_TTS_VOICE.id) body.ttsVoice = job.voice;
                     const response = await fetch(SUPABASE_CHAT_ENDPOINT, { method: 'POST', headers, body: JSON.stringify(body) });
                     const data = await response.json();
                     if (!response.ok || !data.audio) throw new Error(data.error || `HTTP ${response.status}`);
                     if (data.cached) fromCache++; else created++;
                     // Pediu voz do Google e veio da Microsoft (sem chave, erro ou
                     // limite do mês): esse texto fica salvo na Microsoft, não no Google.
-                    if (voice !== MICROSOFT_TTS_VOICE.id && data.provider && data.provider !== 'google') fellBack++;
+                    if (job.voice !== MICROSOFT_TTS_VOICE.id && data.provider && data.provider !== 'google') fellBack++;
                 } catch (e) {
                     failed++;
                     console.warn('[Pré-geração] falhou:', job.text.slice(0, 40), e?.message || e);
@@ -15138,7 +15311,7 @@ async function runTtsPregen() {
         await Promise.all(Array.from({ length: TTS_PREGEN_CONCURRENCY }, worker));
         const stopped = ttsPregenStopRequested && done < jobs.length;
         setTtsPregenStatus(
-            (stopped ? `Parado em ${done} de ${jobs.length}. ` : `Pronto! ${jobs.length} textos (~${totalChars.toLocaleString('pt-BR')} caracteres). `)
+            (stopped ? `Parado em ${done} de ${jobs.length}. ` : `Pronto! ${texts.length} textos em ${voices.length} voz(es) (~${totalChars.toLocaleString('pt-BR')} caracteres por voz). `)
             + `${created} gerados agora, ${fromCache} já estavam salvos`
             + (failed ? `, ${failed} com erro (rode de novo pra tentar só esses)` : '') + '.'
             + (fellBack ? ` Atenção: ${fellBack} saíram na voz da Microsoft porque o Google não respondeu (chave ou limite do mês).` : ''),
@@ -15153,11 +15326,14 @@ async function runTtsPregen() {
     }
 }
 
+function ttsVoiceLabel(id) {
+    return (TTS_VOICE_OPTIONS.find(v => v.id === id) || MICROSOFT_TTS_VOICE).label;
+}
+
 document.getElementById('btn-tts-pregen-start')?.addEventListener('click', () => {
-    const voice = currentTtsVoice || MICROSOFT_TTS_VOICE.id;
-    const voiceLabel = (TTS_VOICE_OPTIONS.find(v => v.id === voice) || MICROSOFT_TTS_VOICE).label;
-    const isGoogle = voice !== MICROSOFT_TTS_VOICE.id;
-    const msg = `Gerar o áudio de todo o conteúdo na voz ${voiceLabel}?`
+    const voices = releasedTtsVoiceIds();
+    const isGoogle = voices.some(id => id !== MICROSOFT_TTS_VOICE.id);
+    const msg = `Gerar o áudio de todo o conteúdo nas vozes liberadas (${voices.map(ttsVoiceLabel).join(', ')})?`
         + (isGoogle ? '\n\nConta na cota grátis do Google (o app para antes de passar dela). O que já estiver salvo não gera de novo.' : '\n\nA voz da Microsoft é grátis. O que já estiver salvo não gera de novo.')
         + '\n\nLeva alguns minutos; deixe esta aba aberta.';
     if (confirm(msg)) runTtsPregen();
@@ -15210,15 +15386,25 @@ async function playAdminVoiceSample(voice, button) {
 
 async function saveTtsVoiceSetting(voice) {
     if (!supabaseClient) return;
-    const { error } = await supabaseClient.from('app_settings').upsert({
-        key: 'tts_voice', value: voice.id, updated_at: new Date().toISOString(), updated_by: currentUserId
-    });
+    let ids = releasedTtsVoiceIds();
+    if (!ids.includes(voice.id)) {
+        // A padrão precisa estar liberada: entra no lugar da padrão antiga.
+        ids = ids.filter(id => id !== (appDefaultTtsVoice || MICROSOFT_TTS_VOICE.id));
+        if (ids.length >= MAX_RELEASED_TTS_VOICES) {
+            showAdminVoiceFeedback(`Já há ${MAX_RELEASED_TTS_VOICES} vozes liberadas. Desmarque uma antes de tornar ${voice.label} a padrão.`, true);
+            return;
+        }
+        ids = [voice.id, ...ids];
+    }
+    const error = (await saveAppSetting('tts_voice', voice.id)) || (await saveAppSetting('tts_voices', ids.join(',')));
     if (error) {
         showAdminVoiceFeedback('Não foi possível salvar a voz: ' + error.message, true);
         return;
     }
-    setCurrentTtsVoice(voice.id);
-    showAdminVoiceFeedback(`Pronto! A voz ${voice.label} passa a ser usada no app. Quem já está com o app aberto passa a ouvir a voz nova ao recarregar a página.`);
+    appDefaultTtsVoice = voice.id;
+    appReleasedTtsVoices = ids;
+    applyEffectiveTtsVoice();
+    showAdminVoiceFeedback(`Pronto! ${voice.label} é a voz padrão: vale pra quem não escolheu outra no Meu perfil. Quem já está com o app aberto ouve a mudança ao recarregar.`);
     renderAdminVoicePanel();
 }
 document.getElementById('btn-admin-tab-logs')?.addEventListener('click', () => setAdminTab('logs'));

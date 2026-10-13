@@ -1168,15 +1168,16 @@
                         <div class="media-header">
                             <div>
                                 <h2>Voz do app</h2>
-                                <p class="media-hint" style="margin-top: 5px;">Escolha a voz que lê os cards, exercícios e jogos para todos os usuários. Toque em "Ouvir" para comparar.</p>
+                                <p class="media-hint" style="margin-top: 5px;">Libere até 3 vozes para cada pessoa escolher a sua no Meu perfil, e defina a padrão (para quem não escolher). Toque em ▶ para ouvir.</p>
                             </div>
                         </div>
                         <div id="admin-voice-feedback" class="admin-feedback" role="status" aria-live="polite" style="display:none;"></div>
                         <p class="media-hint tts-voice-usage" id="admin-voice-usage"></p>
+                        <p class="media-hint tts-voice-usage" id="admin-voice-released-count"></p>
                         <div class="tts-pregen-box" id="admin-voice-pregen">
                             <div class="tts-pregen-text">
                                 <strong>Gerar áudios de todo o conteúdo</strong>
-                                <span id="tts-pregen-summary">Gera de uma vez, na voz em uso, o áudio de cards, pastas e exercícios e guarda no servidor — assim ninguém espera a primeira vez de cada texto.</span>
+                                <span id="tts-pregen-summary">Gera de uma vez, nas vozes liberadas, o áudio de cards, pastas e exercícios e guarda no servidor — assim ninguém espera a primeira vez de cada texto.</span>
                             </div>
                             <div class="tts-pregen-actions">
                                 <button type="button" class="btn-primary" id="btn-tts-pregen-start"><i class="fas fa-bolt" aria-hidden="true"></i> Gerar agora</button>
@@ -2501,6 +2502,12 @@
                 </div>
                 <input type="file" id="profile-photo-input" accept="image/*" hidden>
             </section>
+            <!-- Voz que lê o app: escolhida entre as vozes liberadas pelo admin (aba "Voz do app"). -->
+            <section class="profile-voice" id="profile-voice-section" hidden>
+                <h3>Voz que lê o app</h3>
+                <ul class="tts-voice-list" id="profile-voice-list"></ul>
+                <p class="profile-status" id="profile-voice-status" role="status" aria-live="polite"></p>
+            </section>
             <!-- Senha separada da foto: só aparece ao clicar em "Mudar senha". -->
             <button type="button" class="btn-secondary profile-password-toggle" id="btn-profile-password-toggle" aria-expanded="false" aria-controls="profile-password-form">
                 <i class="fas fa-key" aria-hidden="true"></i> Mudar senha
@@ -2725,12 +2732,12 @@
         }
     </style>
 
-    <link rel="stylesheet" href="style.css?v=58">
+    <link rel="stylesheet" href="style.css?v=59">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=126"></script>
+    <script defer src="app.js?v=127"></script>
 </body>
 
 
