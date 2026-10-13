@@ -1905,6 +1905,7 @@ function setAdminTab(tabName) {
         loadAdminLogsPanel();
     } else if (tabName === 'voice') {
         loadTtsVoiceSetting().then(renderAdminVoicePanel);
+        renderAdminVoiceUsage();
     }
 }
 
@@ -2238,7 +2239,11 @@ async function getIaEndpointHeaders() {
 // A chave NÃO começa com "comunica_tts_": a limpeza do cache de áudio apaga
 // tudo com esse prefixo e levaria a voz junto.
 const TTS_VOICE_STORAGE_KEY = 'comunica_voz_do_app';
-// Todas as vozes Chirp 3 HD em pt-BR do Google (as mais naturais), por gênero.
+// Voz atual do app (Microsoft Francisca): padrão quando o admin não escolheu
+// nenhuma. As demais são todas as Chirp 3 HD em pt-BR do Google, por gênero.
+const MICROSOFT_TTS_VOICE = { id: 'microsoft-francisca', label: 'Francisca (Microsoft)', gender: 'Microsoft' };
+const GOOGLE_FREE_MONTHLY_CHARS = 1_000_000;
+const GOOGLE_APP_MONTHLY_LIMIT = 900_000; // mesmo valor da trava na função chat
 const TTS_VOICE_OPTIONS = [
     { id: 'pt-BR-Chirp3-HD-Achernar', label: 'Achernar', gender: 'Feminina' },
     { id: 'pt-BR-Chirp3-HD-Aoede', label: 'Aoede', gender: 'Feminina' },
@@ -14940,60 +14945,90 @@ function renderAdminVoicePanel() {
     const list = document.getElementById('admin-voice-list');
     if (!list) return;
     list.innerHTML = '';
-    // Sem voz escolhida ainda, a função usa a Kore (padrão) — mostra ela como a atual.
-    const activeVoice = currentTtsVoice || 'pt-BR-Chirp3-HD-Kore';
+    // Sem voz escolhida, o app usa a voz da Microsoft (a de sempre).
+    const activeVoice = currentTtsVoice || MICROSOFT_TTS_VOICE.id;
 
-    // Lista compacta em duas colunas (Femininas / Masculinas): 30 vozes em cards
-    // não cabiam na tela.
+    // Voz atual do app (Microsoft) primeiro, numa linha própria; depois as 30
+    // do Google em duas colunas (Femininas / Masculinas).
+    const microsoftSection = document.createElement('section');
+    microsoftSection.className = 'tts-voice-column tts-voice-microsoft';
+    const microsoftHeading = document.createElement('h3');
+    microsoftHeading.textContent = 'Voz atual do app (Microsoft)';
+    const microsoftList = document.createElement('ul');
+    microsoftList.className = 'tts-voice-list';
+    microsoftList.appendChild(buildAdminVoiceRow(MICROSOFT_TTS_VOICE, activeVoice));
+    microsoftSection.append(microsoftHeading, microsoftList);
+    list.appendChild(microsoftSection);
+
     ['Feminina', 'Masculina'].forEach(gender => {
         const column = document.createElement('section');
         column.className = 'tts-voice-column';
         const voices = TTS_VOICE_OPTIONS.filter(v => v.gender === gender);
         const heading = document.createElement('h3');
-        heading.textContent = `${gender === 'Feminina' ? 'Femininas' : 'Masculinas'} (${voices.length})`;
+        heading.textContent = `Google · ${gender === 'Feminina' ? 'Femininas' : 'Masculinas'} (${voices.length})`;
         const ul = document.createElement('ul');
         ul.className = 'tts-voice-list';
 
-        voices.forEach(voice => {
-            const isActive = voice.id === activeVoice;
-            const isPlaying = adminVoiceSamplePlaying === voice.id;
-            const li = document.createElement('li');
-            li.className = 'tts-voice-row' + (isActive ? ' is-active' : '');
-
-            const sampleBtn = document.createElement('button');
-            sampleBtn.type = 'button';
-            sampleBtn.className = 'tts-voice-sample' + (isPlaying ? ' is-playing' : '');
-            sampleBtn.innerHTML = isPlaying
-                ? '<i class="fas fa-stop" aria-hidden="true"></i>'
-                : '<i class="fas fa-play" aria-hidden="true"></i>';
-            sampleBtn.title = isPlaying ? 'Parar' : 'Ouvir amostra';
-            sampleBtn.setAttribute('aria-label', `${isPlaying ? 'Parar' : 'Ouvir'} amostra da voz ${voice.label}`);
-            sampleBtn.addEventListener('click', () => playAdminVoiceSample(voice, sampleBtn));
-
-            const name = document.createElement('span');
-            name.className = 'tts-voice-name';
-            name.textContent = voice.label;
-
-            li.append(sampleBtn, name);
-            if (isActive) {
-                const badge = document.createElement('span');
-                badge.className = 'tts-voice-badge';
-                badge.textContent = 'Em uso';
-                li.appendChild(badge);
-            } else {
-                const useBtn = document.createElement('button');
-                useBtn.type = 'button';
-                useBtn.className = 'tts-voice-use';
-                useBtn.textContent = 'Usar';
-                useBtn.setAttribute('aria-label', `Usar a voz ${voice.label} no app`);
-                useBtn.addEventListener('click', () => saveTtsVoiceSetting(voice));
-                li.appendChild(useBtn);
-            }
-            ul.appendChild(li);
-        });
+        voices.forEach(voice => ul.appendChild(buildAdminVoiceRow(voice, activeVoice)));
         column.append(heading, ul);
         list.appendChild(column);
     });
+}
+
+function buildAdminVoiceRow(voice, activeVoice) {
+    const isActive = voice.id === activeVoice;
+    const isPlaying = adminVoiceSamplePlaying === voice.id;
+    const li = document.createElement('li');
+    li.className = 'tts-voice-row' + (isActive ? ' is-active' : '');
+
+    const sampleBtn = document.createElement('button');
+    sampleBtn.type = 'button';
+    sampleBtn.className = 'tts-voice-sample' + (isPlaying ? ' is-playing' : '');
+    sampleBtn.innerHTML = isPlaying
+        ? '<i class="fas fa-stop" aria-hidden="true"></i>'
+        : '<i class="fas fa-play" aria-hidden="true"></i>';
+    sampleBtn.title = isPlaying ? 'Parar' : 'Ouvir amostra';
+    sampleBtn.setAttribute('aria-label', `${isPlaying ? 'Parar' : 'Ouvir'} amostra da voz ${voice.label}`);
+    sampleBtn.addEventListener('click', () => playAdminVoiceSample(voice, sampleBtn));
+
+    const name = document.createElement('span');
+    name.className = 'tts-voice-name';
+    name.textContent = voice.label;
+
+    li.append(sampleBtn, name);
+    if (isActive) {
+        const badge = document.createElement('span');
+        badge.className = 'tts-voice-badge';
+        badge.textContent = 'Em uso';
+        li.appendChild(badge);
+    } else {
+        const useBtn = document.createElement('button');
+        useBtn.type = 'button';
+        useBtn.className = 'tts-voice-use';
+        useBtn.textContent = 'Usar';
+        useBtn.setAttribute('aria-label', `Usar a voz ${voice.label} no app`);
+        useBtn.addEventListener('click', () => saveTtsVoiceSetting(voice));
+        li.appendChild(useBtn);
+    }
+    return li;
+}
+
+// Consumo do Google no mês (tts_usage, gravado pela função chat): a cota
+// grátis das Chirp 3 HD é 1 milhão de caracteres/mês e a função para de gerar
+// no Google em 900 mil.
+async function renderAdminVoiceUsage() {
+    const el = document.getElementById('admin-voice-usage');
+    if (!el || !supabaseClient) return;
+    const month = new Date().toISOString().slice(0, 7);
+    const { data, error } = await supabaseClient.from('tts_usage').select('google_chars').eq('month', month).maybeSingle();
+    if (error) { el.textContent = ''; return; }
+    const used = Number(data?.google_chars || 0);
+    const monthName = new Date().toLocaleDateString('pt-BR', { month: 'long', timeZone: 'UTC' });
+    const fmt = (n) => n.toLocaleString('pt-BR');
+    el.textContent = `Google em ${monthName}: ${fmt(used)} de ${fmt(GOOGLE_FREE_MONTHLY_CHARS)} caracteres grátis gerados. `
+        + (used >= GOOGLE_APP_MONTHLY_LIMIT
+            ? 'Limite do app atingido: textos novos usam a voz da Microsoft até o mês virar (o que já foi gerado continua no Google).'
+            : `O app para de usar o Google em ${fmt(GOOGLE_APP_MONTHLY_LIMIT)}, pra nunca sair do grátis.`);
 }
 
 async function playAdminVoiceSample(voice, button) {
@@ -15020,13 +15055,15 @@ async function playAdminVoiceSample(voice, button) {
         if (adminVoiceSamplePlaying !== voice.id) return; // clicou em outra no meio
         // Sem a chave do Google (ou com erro nela) a função cai na voz padrão e
         // todas as amostras soariam iguais — avisa em vez de enganar.
-        const notGoogle = data.provider && data.provider !== 'google';
+        const notGoogle = voice.id !== MICROSOFT_TTS_VOICE.id && data.provider && data.provider !== 'google';
         adminVoiceSampleAudio = new Audio('data:audio/mp3;base64,' + audioBase64);
         adminVoiceSampleAudio.onended = () => { adminVoiceSamplePlaying = null; renderAdminVoicePanel(); };
         renderAdminVoicePanel();
         await adminVoiceSampleAudio.play();
         showAdminVoiceFeedback(notGoogle
-            ? 'Atenção: o Google TTS não respondeu neste ambiente (chave GOOGLE_TTS_API_KEY ausente ou com erro), então a amostra saiu na voz padrão. Confira o secret da função "chat" no Supabase.'
+            ? (data.googleLimitReached
+                ? 'O limite mensal do Google no app foi atingido, então a amostra saiu na voz da Microsoft. O Google volta no próximo mês.'
+                : 'Atenção: o Google TTS não respondeu neste ambiente (chave GOOGLE_TTS_API_KEY ausente ou com erro), então a amostra saiu na voz da Microsoft. Confira o secret da função "chat" no Supabase.')
             : '', notGoogle);
     } catch (e) {
         adminVoiceSamplePlaying = null;

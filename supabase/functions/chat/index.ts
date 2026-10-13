@@ -25,6 +25,37 @@ const TTS_CACHE_BUCKET = "tts-cache";
 const TTS_CACHE_VERSION = "v1";
 const storageAdmin = SERVICE_ROLE_KEY ? createClient(SUPABASE_URL, SERVICE_ROLE_KEY) : null;
 
+// Voz atual do app (Microsoft Francisca, via edge-tts com o Azure de reserva).
+// É o padrão quando o admin não escolheu voz: o Google só entra quando uma voz
+// Chirp 3 HD é escolhida na aba "Voz do app".
+const MICROSOFT_VOICE_ID = "microsoft-francisca";
+
+// Trava mensal do Google: a cota grátis das Chirp 3 HD é 1 milhão de
+// caracteres/mês; para de gerar no Google ao chegar em 900 mil (margem), até
+// virar o mês. Contagem em public.tts_usage (migration 20261015000002).
+const GOOGLE_MONTHLY_CHAR_LIMIT = 900_000;
+
+function currentUsageMonth(): string {
+  return new Date().toISOString().slice(0, 7); // AAAA-MM (UTC)
+}
+
+async function googleMonthlyUsage(): Promise<number> {
+  if (!storageAdmin) return 0;
+  try {
+    const { data } = await storageAdmin.from("tts_usage").select("google_chars").eq("month", currentUsageMonth()).maybeSingle();
+    return Number(data?.google_chars ?? 0);
+  } catch (e) {
+    console.error("Leitura do uso do Google TTS falhou:", (e as Error).message);
+    return 0;
+  }
+}
+
+async function addGoogleMonthlyUsage(chars: number): Promise<void> {
+  if (!storageAdmin) return;
+  const { error } = await storageAdmin.rpc("add_tts_usage", { p_month: currentUsageMonth(), p_chars: chars });
+  if (error) console.error("Registro do uso do Google TTS falhou:", error.message);
+}
+
 async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -161,47 +192,60 @@ Deno.serve(async (req) => {
       // navegador via playbackRate). Sem ttsRate, mantém o -15% padrão de sempre.
       if (ttsText) {
         let audioBase64: string | null = null;
-        // Qual serviço gerou o áudio — a aba "Voz do app" avisa quando não foi o
-        // Google (sem chave/erro), senão as amostras soariam todas iguais.
-        let provider = "google";
+        // Qual voz gerou o áudio — a aba "Voz do app" avisa quando uma voz do
+        // Google foi pedida mas não respondeu (sem chave/erro/limite do mês).
+        let provider = "microsoft";
         let cached = false;
+        let googleLimitReached = false;
         const speechText = cleanTextForSpeech(ttsText);
-        // 1º Google Cloud TTS, se o secret GOOGLE_TTS_API_KEY existir no projeto
-        // (vozes Chirp 3 HD); qualquer erro cai no edge-tts de sempre, então sem
-        // a chave nada muda. Cada serviço consulta o cache antes de gerar.
+
+        // 1º Google, só se o admin escolheu uma voz Chirp 3 HD (ou se o projeto
+        // define GOOGLE_TTS_VOICE) e o secret GOOGLE_TTS_API_KEY existe. Áudio
+        // já guardado sai do cache mesmo com o limite do mês atingido.
         const googleKey = Deno.env.get("GOOGLE_TTS_API_KEY");
-        if (googleKey) {
-          const googlePath = await ttsCachePath("google", resolveGoogleVoice(ttsVoice), speechText, ttsRate);
+        const googleVoice = resolveGoogleVoice(ttsVoice);
+        if (googleKey && googleVoice) {
+          const googlePath = await ttsCachePath("google", googleVoice, speechText, ttsRate);
           audioBase64 = await readTtsCache(googlePath);
           cached = !!audioBase64;
           if (!audioBase64) {
-            try {
-              audioBase64 = await synthesizeTextWithGoogle(speechText, googleKey, ttsRate, ttsVoice);
-              await saveTtsCacheInBackground(googlePath, audioBase64);
-            } catch (googleError) {
-              console.error("Google TTS falhou, usando edge-tts:", (googleError as Error).message);
+            googleLimitReached = (await googleMonthlyUsage()) >= GOOGLE_MONTHLY_CHAR_LIMIT;
+            if (googleLimitReached) {
+              console.warn("Limite mensal do Google TTS atingido; usando a voz da Microsoft até virar o mês.");
+            } else {
+              try {
+                audioBase64 = await synthesizeTextWithGoogle(speechText, googleKey, ttsRate, googleVoice);
+                await addGoogleMonthlyUsage(speechText.length);
+                await saveTtsCacheInBackground(googlePath, audioBase64);
+              } catch (googleError) {
+                console.error("Google TTS falhou, usando a voz da Microsoft:", (googleError as Error).message);
+              }
             }
           }
+          if (audioBase64) provider = "google";
         }
+
+        // Voz da Microsoft (Francisca): edge-tts grátis, com o Azure de reserva.
+        // Os dois usam a mesma voz, então dividem o cache. O Azure ignora a
+        // velocidade (sempre -15%), então só é guardado na velocidade padrão.
         if (!audioBase64) {
-          provider = "edge-tts";
-          const edgePath = await ttsCachePath("edge-tts", "padrao", speechText, ttsRate);
-          audioBase64 = await readTtsCache(edgePath);
+          const microsoftPath = await ttsCachePath("microsoft", "francisca", speechText, ttsRate);
+          audioBase64 = await readTtsCache(microsoftPath);
           cached = !!audioBase64;
           if (!audioBase64) {
             try {
               audioBase64 = encodeBase64(await edgeTtsSynthesize(speechText, undefined, ttsRate));
-              await saveTtsCacheInBackground(edgePath, audioBase64);
+              await saveTtsCacheInBackground(microsoftPath, audioBase64);
             } catch (edgeError) {
               console.error("edge-tts falhou, tentando Azure:", (edgeError as Error).message);
               if (!apiKey) throw edgeError;
-              provider = "azure";
               audioBase64 = await synthesizeTextWithAzure(ttsText, apiKey);
+              if (!ttsRate) await saveTtsCacheInBackground(microsoftPath, audioBase64);
             }
           }
         }
         return new Response(
-          JSON.stringify({ audio: audioBase64, provider, cached }),
+          JSON.stringify({ audio: audioBase64, provider, cached, googleLimitReached }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
         );
       }
@@ -320,15 +364,16 @@ export function cleanTextForSpeech(text: string): string {
 // vozes de outras famílias (Studio etc., bem mais caras).
 const ALLOWED_GOOGLE_VOICE_RE = /^pt-BR-Chirp3-HD-[A-Za-z]+$/;
 
-// Voz pedida pelo app (se for Chirp 3 HD pt-BR) → GOOGLE_TTS_VOICE → Kore.
-function resolveGoogleVoice(requestedVoice?: string): string {
-  return (requestedVoice && ALLOWED_GOOGLE_VOICE_RE.test(requestedVoice))
-    ? requestedVoice
-    : (Deno.env.get("GOOGLE_TTS_VOICE") || "pt-BR-Chirp3-HD-Kore");
+// Voz do Google a usar, ou null pra voz da Microsoft: a pedida pelo app (se
+// for Chirp 3 HD pt-BR); sem pedido, GOOGLE_TTS_VOICE se o projeto definir.
+function resolveGoogleVoice(requestedVoice?: string): string | null {
+  if (requestedVoice === MICROSOFT_VOICE_ID) return null;
+  if (requestedVoice && ALLOWED_GOOGLE_VOICE_RE.test(requestedVoice)) return requestedVoice;
+  const envVoice = Deno.env.get("GOOGLE_TTS_VOICE");
+  return envVoice && ALLOWED_GOOGLE_VOICE_RE.test(envVoice) ? envVoice : null;
 }
 
-async function synthesizeTextWithGoogle(text: string, apiKey: string, ttsRate?: string, requestedVoice?: string): Promise<string> {
-  const voiceName = resolveGoogleVoice(requestedVoice);
+async function synthesizeTextWithGoogle(text: string, apiKey: string, ttsRate: string | undefined, voiceName: string): Promise<string> {
   // Os -15% de sempre foram calibrados pro edge-tts; as Chirp 3 HD já falam
   // pausado e, com eles, soavam arrastadas. Aqui o "-15%" padrão vira a
   // velocidade natural (1.0), e os ajustes da Leitura de Texto ("-25%" a

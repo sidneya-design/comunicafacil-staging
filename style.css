@@ -4966,6 +4966,8 @@ button, .action-btn { touch-action: manipulation; }
 /* Aba "Voz do app" (admin): lista compacta em duas colunas (Femininas / Masculinas) */
 .tts-voice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .tts-voice-column h3 { margin: 0 0 8px; font-size: 1rem; color: #1f2933; }
+.tts-voice-microsoft { grid-column: 1 / -1; }
+.tts-voice-usage { margin: 0 0 14px; }
 .tts-voice-list { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid #e3e7ee; border-radius: 12px; overflow: hidden; }
 .tts-voice-row { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid #f0f2f5; }
 .tts-voice-row:last-child { border-bottom: none; }
