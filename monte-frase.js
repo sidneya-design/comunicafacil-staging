@@ -260,10 +260,14 @@ function shuffleForDisplay(items, orders) {
 const LOCAL_API = "http://127.0.0.1:5001";
 const ttsCache = new Map();
 let currentAudio = null;
-// Velocidade escolhida pelo paciente (Devagar/Normal/Rápido); vale para todo
+// Velocidade escolhida pelo paciente (Bem devagar/Devagar/Normal/Rápido); vale para todo
 // áudio do exercício e fica guardada neste aparelho.
 const RATE_KEY = "monte-frase:audio-rate";
-const RATES = [0.75, 1, 1.25];
+const RATES = [0.5, 0.75, 1, 1.25];
+// O áudio já vem sintetizado na velocidade (SSML <prosody rate>, como na
+// Leitura de Texto): esticar no navegador com playbackRate quase não mudava
+// o "Bem devagar" do "Devagar" e soava robótico. Normal = padrão do backend (-15%).
+const TTS_RATE_MAP = { 0.5: "-50%", 0.75: "-35%", 1.25: "+5%" };
 let audioRate = 1;
 try {
     const saved = Number(localStorage.getItem(RATE_KEY));
@@ -276,8 +280,9 @@ function currentTtsVoice() {
     try { return localStorage.getItem("comunica_voz_do_app") || null; } catch (error) { return null; }
 }
 
-async function fetchTtsAudio(endpoint, text) {
+async function fetchTtsAudio(endpoint, text, ttsRate) {
     const body = { ttsText: text };
+    if (ttsRate) body.ttsRate = ttsRate;
     const voice = currentTtsVoice();
     if (voice) body.ttsVoice = voice;
     const response = await fetch(endpoint, {
@@ -290,9 +295,10 @@ async function fetchTtsAudio(endpoint, text) {
     return data.audio;
 }
 
-async function fetchSupabaseTtsAudio(text) {
+async function fetchSupabaseTtsAudio(text, ttsRate) {
     if (!supabase) throw new Error("Supabase indisponível");
     const body = { ttsText: text };
+    if (ttsRate) body.ttsRate = ttsRate;
     const voice = currentTtsVoice();
     if (voice) body.ttsVoice = voice;
     const { data, error } = await supabase.functions.invoke("chat", { body });
@@ -301,15 +307,16 @@ async function fetchSupabaseTtsAudio(text) {
 }
 
 function getTtsAudio(text) {
-    // Voz na chave do cache (só memória): a voz pode mudar entre aberturas.
+    // Voz e velocidade na chave do cache (só memória): podem mudar entre aberturas.
     const voice = currentTtsVoice();
-    const cacheKey = voice ? `${voice}::${text}` : text;
+    const ttsRate = TTS_RATE_MAP[audioRate] || null;
+    const cacheKey = `${voice || ""}::${ttsRate || ""}::${text}`;
     if (ttsCache.has(cacheKey)) return ttsCache.get(cacheKey);
     const promise = (async () => {
         if (isLocalhost) {
-            try { return await fetchTtsAudio(`${LOCAL_API}/chat`, text); } catch (localError) { /* cai pro Supabase */ }
+            try { return await fetchTtsAudio(`${LOCAL_API}/chat`, text, ttsRate); } catch (localError) { /* cai pro Supabase */ }
         }
-        return fetchSupabaseTtsAudio(text);
+        return fetchSupabaseTtsAudio(text, ttsRate);
     })();
     promise.catch(() => ttsCache.delete(cacheKey));
     ttsCache.set(cacheKey, promise);
@@ -339,7 +346,6 @@ async function speak(text, { force = false } = {}) {
     try {
         const audioBase64 = await getTtsAudio(text);
         currentAudio = new Audio(`data:audio/mp3;base64,${audioBase64}`);
-        currentAudio.playbackRate = audioRate;
         await currentAudio.play();
     } catch (error) {
         speakNative(text);
@@ -794,8 +800,7 @@ speedOptions.forEach(option => option.addEventListener("click", () => {
     audioRate = Number(option.dataset.rate);
     try { localStorage.setItem(RATE_KEY, String(audioRate)); } catch (error) { /* só nesta visita */ }
     renderSpeed();
-    // Áudio tocando muda na hora; a voz do navegador vale a partir da próxima fala.
-    if (currentAudio && !currentAudio.paused) currentAudio.playbackRate = audioRate;
+    // Vale a partir da próxima fala (o áudio é gerado já na velocidade).
 }));
 renderSpeed();
 document.getElementById("summary-restart").addEventListener("click", () => startLevel());
