@@ -2844,7 +2844,7 @@ function renderMediaCards(mediasArray) {
     const inDoctorPatientContext = isDoctor && activePatientContext;
     const canEditHere = isAdmin || inDoctorPatientContext;
     const baseMedias = inDoctorPatientContext
-        ? mediasArray.filter(m => !m.patientId || m.patientId === activePatientContext.id)
+        ? mediasArray.filter(m => (!m.patientId || m.patientId === activePatientContext.id) && !isUnpublishedAdminContent(m))
         : mediasArray;
     let cardsToRender = canEditHere ? baseMedias : baseMedias.filter(m => m.visible !== false);
 
@@ -3989,7 +3989,7 @@ function renderExerciseCards(exercisesArray) {
     const inDoctorPatientContext = isDoctor && activePatientContext;
     const baseExercises = isDoctor
         ? realExercises.filter(ex => (!ex.patientId || (inDoctorPatientContext && ex.patientId === activePatientContext.id))
-            && !isUnpublishedAdminExercise(ex))
+            && !isUnpublishedAdminContent(ex))
         : realExercises;
 
     // Reconhecimento de Palavras (e, no futuro, de Imagem) agora pode ter
@@ -14379,12 +14379,12 @@ let currentUserCompanyId = null; // company_id do médico logado (company_member
 // da empresa (colegas) + conteúdo global do admin. Sem o ramo de empresa,
 // mesmo com company_id preenchido e a RLS já permitindo o SELECT, essa
 // lista client-side escondia o que os colegas criaram.
-// Exercício do admin (sem médico dono nem paciente) que ele ainda não
-// publicou (olhinho desligado, visible = false): o médico não vê nem pode
+// Exercício ou mídia do admin (sem médico dono nem paciente) que ele ainda
+// não publicou (olhinho desligado, visible = false): o médico não vê nem pode
 // liberar pra paciente. Contêineres de jogo (seed_key) ficam de fora: a
 // publicação deles é a dos jogos, não esta coluna. Aceita a linha crua do
 // Supabase ou o objeto já convertido do app.
-function isUnpublishedAdminExercise(ex) {
+function isUnpublishedAdminContent(ex) {
     const doctorUserId = ex.doctorUserId ?? ex.doctor_user_id;
     const patientId = ex.patientId ?? ex.patient_id;
     const seedKey = ex.seedKey ?? ex.seed_key;
@@ -16575,7 +16575,7 @@ async function openPatientExercisesModal(patient) {
     // banco sem conversão (decisão do usuário) — não aparecem pra liberar.
     // Exercício do admin ainda não publicado não aparece pra liberar.
     const allEntries = [...(myExercises || []), ...virtualEntries]
-        .filter(ex => !isGameContainerSeedKey(ex.seed_key, MONTE_FRASE_SEED_KEY) && !isUnpublishedAdminExercise(ex));
+        .filter(ex => !isGameContainerSeedKey(ex.seed_key, MONTE_FRASE_SEED_KEY) && !isUnpublishedAdminContent(ex));
 
     list.innerHTML = '';
     if (!allEntries.length) {
@@ -16796,10 +16796,12 @@ async function openPatientMediasModal(patient) {
     if (patientMediasModal) patientMediasModal.style.display = 'flex';
 
     // Inclui o banco do médico E o conteúdo global do admin (Fase 21).
-    const { data: myMedias } = await supabaseClient
-        .from('medias').select('id, title, doctor_user_id')
+    const { data: bankMedias } = await supabaseClient
+        .from('medias').select('id, title, doctor_user_id, patient_id, visible')
         .or(doctorBankOrFilter())
         .order('title');
+    // Mídia do admin ainda não publicada não aparece pra liberar.
+    const myMedias = (bankMedias || []).filter(media => !isUnpublishedAdminContent(media));
     const { data: overrides } = await supabaseClient
         .from('patient_media_flags').select('media_id, visible').eq('patient_id', patient.id);
     const overrideMap = new Map((overrides || []).map(r => [r.media_id, r.visible]));
