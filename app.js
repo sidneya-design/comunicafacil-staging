@@ -8332,6 +8332,8 @@ let dictationSessionId = null;
 let dictationAccuracies = []; // acerto de cada frase respondida nesta rodada
 let dictationListens = 0;
 let dictationStartedAt = 0;
+let dictationFirstKeyAt = 0; // primeira tecla da frase atual (0 = ainda não escreveu)
+let dictationCorrections = 0; // quantas vezes apagou na frase atual
 let dictationAnswered = false;
 
 function openDictationExercise(ex) {
@@ -8406,6 +8408,8 @@ function renderDictationPhrase() {
     dictationListens = 0;
     dictationAnswered = false;
     dictationStartedAt = Date.now();
+    dictationFirstKeyAt = 0;
+    dictationCorrections = 0;
     const nextItem = dictationPhrases[dictationIndex + 1];
     if (nextItem) prefetchTts(nextItem.text);
     playDictationAudio();
@@ -8465,16 +8469,41 @@ function compareDictation(target, answer) {
     };
 }
 
+// Erros de letra: distância de edição entre a frase e a resposta inteiras
+// (letras faltando, sobrando ou trocadas), sem maiúscula nem pontuação;
+// acento e espaço contam.
+function dictationLetterErrors(target, answer) {
+    const normalize = text => dictationTokens(text).map(token => token.norm).join(' ');
+    const t = [...normalize(target)];
+    const a = [...normalize(answer)];
+    let previous = Array.from({ length: a.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= t.length; i++) {
+        const current = [i];
+        for (let j = 1; j <= a.length; j++) {
+            current[j] = Math.min(previous[j - 1] + (t[i - 1] === a[j - 1] ? 0 : 1), previous[j] + 1, current[j - 1] + 1);
+        }
+        previous = current;
+    }
+    return previous[a.length];
+}
+
 function checkDictationAnswer() {
     const item = dictationPhrases[dictationIndex];
     const answerEl = document.getElementById('dictation-answer');
     const answer = answerEl.value.trim();
     if (!item || !answer || dictationAnswered) return;
     dictationAnswered = true;
-    const seconds = Math.max(0, Math.round((Date.now() - dictationStartedAt) / 1000));
+    const now = Date.now();
+    const firstKeyAt = dictationFirstKeyAt || now;
+    const timing = {
+        seconds: Math.max(0, Math.round((now - dictationStartedAt) / 1000)),
+        firstKeyMs: Math.max(0, firstKeyAt - dictationStartedAt),
+        typingMs: Math.max(0, now - firstKeyAt)
+    };
     const result = compareDictation(item.text, answer);
+    result.letterErrors = dictationLetterErrors(item.text, answer);
     dictationAccuracies.push(result.accuracy);
-    logDictationResult(item, answer, result, seconds);
+    logDictationResult(item, answer, result, timing);
 
     answerEl.disabled = true;
     answerEl.classList.add('is-locked');
@@ -8504,7 +8533,7 @@ function checkDictationAnswer() {
     nextBtn.focus();
 }
 
-function logDictationResult(item, answer, result, seconds) {
+function logDictationResult(item, answer, result, timing) {
     if (!supabaseClient || isAdmin || isDoctor || !currentPatientId) return;
     supabaseClient.from('activity_results').insert([{
         patient_id: currentPatientId,
@@ -8517,7 +8546,11 @@ function logDictationResult(item, answer, result, seconds) {
         listens: dictationListens,
         moves: result.errors,
         hints: 0,
-        seconds
+        seconds: timing.seconds,
+        first_key_ms: timing.firstKeyMs,
+        typing_ms: timing.typingMs,
+        letter_errors: result.letterErrors,
+        corrections: dictationCorrections
     }]).then(({ error }) => {
         if (error) console.warn('Ditado: não consegui registrar o resultado:', error);
     });
@@ -8535,7 +8568,15 @@ function showDictationSummary() {
 
 function setupDictationControls() {
     const answer = document.getElementById('dictation-answer');
+    // beforeinput (e não keydown): no teclado do celular o Backspace costuma
+    // chegar como tecla "Unidentified"; o inputType diz o que aconteceu.
+    answer.addEventListener('beforeinput', (ev) => {
+        if (dictationAnswered) return;
+        if (!dictationFirstKeyAt) dictationFirstKeyAt = Date.now();
+        if (ev.inputType && ev.inputType.startsWith('delete') && answer.value) dictationCorrections += 1;
+    });
     answer.addEventListener('input', () => {
+        if (!dictationFirstKeyAt) dictationFirstKeyAt = Date.now();
         document.getElementById('btn-dictation-check').disabled = !answer.value.trim();
         if (isDictationHiddenMode() && answer.value.trim()) document.getElementById('dictation-phrase').classList.add('is-hidden');
     });
@@ -17100,7 +17141,7 @@ function groupEvolutionSessions(rows) {
         const listens = session.items.reduce((sum, item) => sum + (item.listens || 0), 0);
         const perfect = session.items.filter(item => item.accuracy === 100).length;
         return {
-            startedAt: session.startedAt, count, moves, hints, seconds, perfect,
+            items: session.items, startedAt: session.startedAt, count, moves, hints, seconds, perfect,
             movesAvg: moves / count, hintsAvg: hints / count, accuracyAvg: accuracy / count, listensAvg: listens / count
         };
     });
@@ -17255,7 +17296,7 @@ async function renderPatientEvolution(body, patientUserId, activity = 'monte-fra
 
     const { data: rows, error } = await supabaseClient
         .from('activity_results')
-        .select('created_at, session_id, exercise_id, item_text, moves, hints, seconds, answer_text, accuracy, listens')
+        .select('created_at, session_id, exercise_id, item_text, moves, hints, seconds, answer_text, accuracy, listens, first_key_ms, typing_ms, letter_errors, corrections')
         .eq('user_id', patientUserId)
         .eq('activity', activity)
         .order('created_at', { ascending: true })
@@ -17280,14 +17321,22 @@ async function renderPatientEvolution(body, patientUserId, activity = 'monte-fra
     // antes dos conjuntos (exercise_id vazio) só entram em "Todos".
     const deckIds = [...new Set(rows.map(row => row.exercise_id).filter(Boolean))];
     const details = document.createElement('div');
-    if (new Set(rows.map(row => row.exercise_id ?? null)).size < 2) {
+    const singleDeck = new Set(rows.map(row => row.exercise_id ?? null)).size < 2;
+    // Nome do conjunto: o filtro usa, e a planilha do Ditado também (mesmo com um só).
+    let decks = [];
+    if (deckIds.length && (!singleDeck || activity === 'dictation')) {
+        ({ data: decks } = await supabaseClient.from('exercises').select('id, title').in('id', deckIds));
+        if (body.dataset.requestId !== requestId) return;
+    }
+    const deckName = id => (id ? ((decks || []).find(deck => deck.id === id)?.title || 'Conjunto apagado') : '').split('|')[0];
+    const patientName = [...document.querySelectorAll('select[id$="-evolution-patient"] option')]
+        .find(option => option.value === patientUserId)?.textContent || '';
+    const meta = { deckName, patientName };
+    if (singleDeck) {
         body.appendChild(details);
-        renderEvolutionDetails(details, rows, activity);
+        renderEvolutionDetails(details, rows, activity, meta);
         return;
     }
-    const { data: decks } = await supabaseClient.from('exercises').select('id, title').in('id', deckIds);
-    if (body.dataset.requestId !== requestId) return;
-    const deckName = id => ((decks || []).find(deck => deck.id === id)?.title || 'Conjunto apagado').split('|')[0];
     const filter = document.createElement('select');
     filter.className = 'evolution-deck-filter';
     filter.setAttribute('aria-label', 'Filtrar por conjunto');
@@ -17298,16 +17347,16 @@ async function renderPatientEvolution(body, patientUserId, activity = 'monte-fra
         filter.appendChild(option);
     });
     const paint = () => renderEvolutionDetails(details,
-        filter.value === 'all' ? rows : rows.filter(row => String(row.exercise_id) === filter.value), activity);
+        filter.value === 'all' ? rows : rows.filter(row => String(row.exercise_id) === filter.value), activity, meta);
     filter.addEventListener('change', paint);
     body.append(filter, details);
     paint();
 }
 
-function renderEvolutionDetails(body, rows, activity = 'monte-frase') {
+function renderEvolutionDetails(body, rows, activity = 'monte-frase', meta = {}) {
     if (patientEvolutionChart) { patientEvolutionChart.destroy(); patientEvolutionChart = null; }
     body.innerHTML = '';
-    if (activity === 'dictation') return renderDictationEvolutionDetails(body, rows);
+    if (activity === 'dictation') return renderDictationEvolutionDetails(body, rows, meta);
     const sessions = groupEvolutionSessions(rows);
     const totalSeconds = rows.reduce((sum, row) => sum + row.seconds, 0);
 
@@ -17403,11 +17452,59 @@ function appendEvolutionTitle(body, text) {
 }
 
 const formatEvolutionPercent = value => `${Math.round(value)}%`;
+// Tempo em ms (Ditado): "1,4 s"; vazio nas respostas de antes dessas colunas.
+const formatEvolutionMs = ms => (ms == null ? '-' : `${(ms / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`);
+// Média de uma coluna ignorando respostas antigas sem ela (null se nenhuma tem).
+function averageOf(rows, key) {
+    const values = rows.map(row => row[key]).filter(value => value != null);
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+const formatEvolutionOptionalAverage = value => (value == null ? '-' : formatEvolutionAverage(value));
+
+// Planilha do Ditado: uma linha por resposta. Ponto e vírgula e BOM pra o
+// Excel em português abrir com acentos e colunas certas.
+function downloadDictationCsv(rows, meta) {
+    const header = ['Paciente', 'Exercício', 'Sessão', 'Data', 'Hora', 'Frase', 'O que escreveu', 'Acerto (%)',
+        'Palavras com erro', 'Erros de letra', 'Correções (apagou)', 'Vezes que ouviu',
+        'Até começar a escrever (s)', 'Escrevendo (s)', 'Tempo na frase (s)'];
+    const sessionNumbers = new Map();
+    const seconds = ms => (ms == null ? '' : (ms / 1000).toFixed(1).replace('.', ','));
+    const lines = rows.map(row => {
+        if (!sessionNumbers.has(row.session_id)) sessionNumbers.set(row.session_id, sessionNumbers.size + 1);
+        const date = new Date(row.created_at);
+        return [
+            meta.patientName || '', meta.deckName ? meta.deckName(row.exercise_id) : '', sessionNumbers.get(row.session_id),
+            date.toLocaleDateString('pt-BR'), date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            row.item_text, row.answer_text || '', row.accuracy ?? '', row.moves ?? '', row.letter_errors ?? '',
+            row.corrections ?? '', row.listens ?? '', seconds(row.first_key_ms), seconds(row.typing_ms), row.seconds
+        ];
+    });
+    const cell = value => {
+        const text = String(value ?? '');
+        return /[;"\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const csv = '\ufeff' + [header, ...lines].map(line => line.map(cell).join(';')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    const slug = (meta.patientName || 'paciente').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+    link.href = url;
+    link.download = `ditado-${slug || 'paciente'}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 // Ditado: acerto médio por sessão, lista de sessões, todas as respostas (o
 // que o paciente escreveu em cada frase) e as frases com menor acerto.
-function renderDictationEvolutionDetails(body, rows) {
+function renderDictationEvolutionDetails(body, rows, meta = {}) {
     const sessions = groupEvolutionSessions(rows);
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.className = 'admin-analytics-action evolution-export-btn';
+    exportBtn.innerHTML = '<i class="fas fa-file-arrow-down" aria-hidden="true"></i> Baixar planilha (CSV)';
+    exportBtn.addEventListener('click', () => downloadDictationCsv(rows, meta));
+    body.appendChild(exportBtn);
     const totalSeconds = rows.reduce((sum, row) => sum + row.seconds, 0);
     const accuracyAvg = rows.reduce((sum, row) => sum + (row.accuracy || 0), 0) / rows.length;
 
@@ -17415,7 +17512,11 @@ function renderDictationEvolutionDetails(body, rows) {
         [sessions.length, sessions.length === 1 ? 'sessão' : 'sessões'],
         [rows.length, 'frases escritas'],
         [formatEvolutionPercent(accuracyAvg), 'acerto médio'],
-        [formatEvolutionDuration(totalSeconds), 'tempo total']
+        [formatEvolutionDuration(totalSeconds), 'tempo total'],
+        [formatEvolutionOptionalAverage(averageOf(rows, 'letter_errors')), 'erros de letra por frase'],
+        [formatEvolutionOptionalAverage(averageOf(rows, 'corrections')), 'correções por frase'],
+        [formatEvolutionMs(averageOf(rows, 'first_key_ms')), 'até começar a escrever (média)'],
+        [formatEvolutionMs(averageOf(rows, 'typing_ms')), 'escrevendo (média por frase)']
     ]);
 
     appendEvolutionTitle(body, 'Acerto médio em cada sessão (quanto maior, melhor)');
@@ -17436,26 +17537,33 @@ function renderDictationEvolutionDetails(body, rows) {
 
     appendEvolutionTitle(body, 'Sessões');
     body.appendChild(evolutionTable(
-        ['Data', 'Frases', 'Sem erro', 'Acerto médio', 'Ouviu (média)', 'Tempo'],
+        ['Data', 'Frases', 'Sem erro', 'Acerto médio', 'Erros de letra (média)', 'Correções (média)', 'Ouviu (média)', 'Escrevendo (média)', 'Tempo na atividade'],
         [...sessions].reverse().map(session => [
             new Date(session.startedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
             session.count,
             session.perfect,
             formatEvolutionPercent(session.accuracyAvg),
+            formatEvolutionOptionalAverage(averageOf(session.items, 'letter_errors')),
+            formatEvolutionOptionalAverage(averageOf(session.items, 'corrections')),
             formatEvolutionAverage(session.listensAvg),
+            formatEvolutionMs(averageOf(session.items, 'typing_ms')),
             formatEvolutionDuration(session.seconds)
         ])
     ));
 
     appendEvolutionTitle(body, 'Respostas (mais recentes primeiro)');
     const answersTable = body.appendChild(evolutionTable(
-        ['Data', 'Frase', 'O que escreveu', 'Acerto', 'Ouviu', 'Tempo'],
+        ['Data', 'Frase', 'O que escreveu', 'Acerto', 'Erros de letra', 'Correções', 'Ouviu', 'Até começar', 'Escrevendo', 'Tempo na frase'],
         [...rows].reverse().map(row => [
             new Date(row.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
             row.item_text,
             row.answer_text || '',
             row.accuracy == null ? '-' : `${row.accuracy}%`,
+            row.letter_errors ?? '-',
+            row.corrections ?? '-',
             row.listens ?? '-',
+            formatEvolutionMs(row.first_key_ms),
+            formatEvolutionMs(row.typing_ms),
             formatEvolutionDuration(row.seconds)
         ])
     ));

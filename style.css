@@ -4825,6 +4825,7 @@ button, .action-btn { touch-action: manipulation; }
 .evolution-chart { position: relative; height: 260px; }
 .evolution-table-wrap { overflow-x: auto; }
 .evolution-table-scroll { max-height: 420px; overflow-y: auto; }
+.evolution-export-btn { align-self: flex-start; margin-bottom: 1rem; }
 .evolution-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .evolution-table th, .evolution-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e3e6ea; }
 .evolution-table th { color: #52514e; font-weight: 600; }
