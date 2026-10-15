@@ -1924,6 +1924,7 @@ function initApp() {
     setupCardEditor();
     setupAudioModuleControls();
     setupMirrorControls();
+    setupDictationControls();
     renderGamesList();
     if (isCompleteSentenceLocalDemo()) {
         setTimeout(() => {
@@ -3917,7 +3918,8 @@ async function loadExerciseCards() {
                         autoPictograms: ex.auto_pictograms !== false,
                         syllablesSize: ex.syllables_size || null,
                         syllablesColor: ex.syllables_color || null,
-                        syllablesFont: ex.syllables_font || null
+                        syllablesFont: ex.syllables_font || null,
+                        dictationMode: ex.dictation_mode || null
                     };
                 });
             }
@@ -3998,6 +4000,7 @@ function renderExerciseCards(exercisesArray) {
         else if (ex.gameKind === 'afasia') openAfasiaDeckManage(ex);
         else if (ex.gameKind === 'syllables') openEditSyllablesExercise(ex);
         else if (ex.gameKind === 'mirror') openEditMirrorExercise(ex);
+        else if (ex.gameKind === 'dictation') openEditDictationExercise(ex);
         else if (ex.gameKind === 'audio-real') openEditAudioExercise(ex);
         else if (ex.gameKind === 'reading-text') openEditReadingTextExercise(ex);
         else if (ex.gameKind === 'monte-frase') openMonteFraseDeck(ex, { manage: true });
@@ -4009,6 +4012,7 @@ function renderExerciseCards(exercisesArray) {
         else if (ex.gameKind === 'monte-frase') openMonteFraseDeck(ex);
         else if (ex.gameKind === 'reading-text') openReadingTextPlayer(ex);
         else if (ex.gameKind === 'mirror') openMirrorExercise(ex);
+        else if (ex.gameKind === 'dictation') openDictationExercise(ex);
         else openPresentationPlaylist(ex);
     };
 
@@ -4086,6 +4090,9 @@ function renderExerciseCards(exercisesArray) {
         } else if (ex.gameKind === 'mirror') {
             // Espelho: frase inteira não cabe legível no card — ícone de câmera.
             imgContainer.innerHTML = '<i class="fas fa-video word-btn-icon" aria-hidden="true"></i>';
+        } else if (ex.gameKind === 'dictation') {
+            // Ditado: a 1ª frase como capa entregaria a resposta — ícone de escrita.
+            imgContainer.innerHTML = '<i class="fas fa-pen-to-square word-btn-icon" aria-hidden="true"></i>';
         } else if (firstItem && firstItem.imageBlob instanceof Blob) {
             imgContainer.innerHTML = `<img src="${URL.createObjectURL(firstItem.imageBlob)}" class="word-btn-img" alt="" />`;
         } else if (firstItem && firstItem.image_url) {
@@ -4229,7 +4236,7 @@ function renderExerciseCards(exercisesArray) {
                 btn.appendChild(createNotifyUsersButton(displayTitle, 'Exercício', { id: ex.patientId, name: patientInfo?.name, email: patientInfo?.email }));
             }
         } else if (isDoctor && ex.doctorUserId && ex.doctorUserId !== currentUserId && !ex.patientId && ex.companyId && ex.companyId === currentUserCompanyId
-                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text' || ex.gameKind === 'monte-frase' || ex.gameKind === 'mirror')) {
+                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text' || ex.gameKind === 'monte-frase' || ex.gameKind === 'mirror' || ex.gameKind === 'dictation')) {
             // Exercício do banco de um colega da mesma empresa (não do admin, não
             // meu): a RLS já libera escrita compartilhada por empresa faz tempo
             // (migration company_shared_doctor_bank), mas a tela nunca tinha
@@ -4244,7 +4251,7 @@ function renderExerciseCards(exercisesArray) {
             };
             btn.appendChild(editBtn);
         } else if (isDoctor && !ex.doctorUserId && ex.companyId && ex.companyId === currentUserCompanyId
-                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text' || ex.gameKind === 'mirror')) {
+                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text' || ex.gameKind === 'mirror' || ex.gameKind === 'dictation')) {
             // Exercício que o admin mandou direto pra empresa do médico: edita em
             // cima do original (a RLS libera essa escrita pra qualquer médico da
             // empresa) — sem fork, os colegas continuam vendo a mesma versão.
@@ -5613,6 +5620,130 @@ function openEditMirrorExercise(ex) {
     });
 }
 
+// Exercício Ditado: mesmo molde do Espelho (saveMirrorExerciseToDB), mais o
+// modo — 'copy' (a frase fica na tela enquanto a pessoa escreve) ou
+// 'dictation' (a frase some quando ela começa a escrever).
+let currentEditingDictationExerciseId = null;
+let currentEditingDictationExerciseFromSupabase = false;
+let dictationBlockCounter = 0;
+
+async function saveDictationExerciseToDB(title, size, color, font, mode, itemsArray, doctorUserId = null, companyId = null) {
+    const shouldTrySupabase = supabaseClient && (!currentEditingDictationExerciseId || currentEditingDictationExerciseFromSupabase);
+    if (shouldTrySupabase) {
+        try {
+            const deckFields = { title, syllables_size: size || null, syllables_color: color || null, syllables_font: font || null, dictation_mode: mode };
+            let targetExerciseId = currentEditingDictationExerciseId;
+
+            if (targetExerciseId) {
+                const updateFields = isAdmin ? { ...deckFields, company_id: companyId } : deckFields;
+                // .select(): com RLS, update bloqueado não dá erro, só não altera nada.
+                const { data: updated, error: updateErr } = await supabaseClient.from('exercises').update(updateFields).eq('id', targetExerciseId).select('id');
+                if (updateErr) throw updateErr;
+                if (!updated || updated.length === 0) throw new Error('sem permissão para editar este exercício');
+                const { error: deleteErr } = await supabaseClient.from('exercise_items').delete().eq('exercise_id', targetExerciseId);
+                if (deleteErr) throw deleteErr;
+            } else {
+                const newExercisePayload = doctorUserId
+                    ? { ...deckFields, visible: true, game_kind: 'dictation', doctor_user_id: doctorUserId, company_id: currentUserCompanyId }
+                    : { ...deckFields, visible: false, game_kind: 'dictation', company_id: companyId };
+                const { data: exData, error: insertErr } = await supabaseClient.from('exercises').insert([newExercisePayload]).select().single();
+                if (insertErr) throw insertErr;
+                targetExerciseId = exData.id;
+            }
+
+            const dbItems = itemsArray.map(item => ({ exercise_id: targetExerciseId, word: item.word, syllables: '', link: '' }));
+            const { error: itemsErr } = await supabaseClient.from('exercise_items').insert(dbItems);
+            if (itemsErr) throw itemsErr;
+
+            logAdminAction(currentEditingDictationExerciseId ? 'update' : 'create', 'exercise', title);
+            loadExerciseCards();
+            return;
+        } catch (e) {
+            console.warn('Erro ao salvar exercício Ditado no Supabase, caindo para local:', e);
+            alert('Não foi possível salvar o exercício no servidor (ficou salvo só neste dispositivo). Detalhe: ' + (e?.message || e));
+        }
+    }
+
+    const localPayload = { title, items: itemsArray, visible: false, gameKind: 'dictation', syllablesSize: size || null, syllablesColor: color || null, syllablesFont: font || null, dictationMode: mode };
+    if (currentEditingDictationExerciseId) {
+        db.transaction(['exercises'], 'readonly').objectStore('exercises').get(currentEditingDictationExerciseId).onsuccess = (e) => {
+            const existing = e.target.result || {};
+            db.transaction(['exercises'], 'readwrite').objectStore('exercises')
+                .put({ ...existing, ...localPayload, id: currentEditingDictationExerciseId })
+                .onsuccess = () => loadExerciseCards();
+        };
+    } else {
+        db.transaction(['exercises'], 'readwrite').objectStore('exercises')
+            .add(localPayload)
+            .onsuccess = () => loadExerciseCards();
+    }
+}
+
+function addDictationItemBlock(isEdit = false) {
+    const container = document.getElementById('dictation-items-container');
+    const blockId = dictationBlockCounter++;
+    const wrapper = document.createElement('div');
+    // Mesmo bloco de frase do Espelho, com a classe do Ditado.
+    wrapper.innerHTML = createMirrorItemBlockHtml(blockId, isEdit)
+        .replace('mirror-item-block', 'dictation-item-block')
+        .replace('mirror-item-phrase', 'dictation-item-phrase');
+    const blockEl = wrapper.firstElementChild;
+    const removeBtn = blockEl.querySelector('.btn-remove-block');
+    if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+            container.removeChild(blockEl);
+            updateDictationBlockTitles();
+        });
+    }
+    wireAllWordEditors(blockEl);
+    container.appendChild(blockEl);
+    updateDictationBlockTitles();
+    return blockEl;
+}
+
+function updateDictationBlockTitles() {
+    document.querySelectorAll('#dictation-items-container .dictation-item-block').forEach((b, index) => {
+        b.querySelector('.block-title').textContent = `Frase ${index + 1}`;
+    });
+}
+
+function openDictationExerciseModal(ex = null) {
+    currentEditingDictationExerciseId = ex ? ex.id : null;
+    currentEditingDictationExerciseFromSupabase = !!ex?.fromSupabase;
+    dictationBlockCounter = 0;
+
+    const modal = document.getElementById('dictation-exercise-modal');
+    modal.style.display = 'flex';
+    modal.querySelector('h2').textContent = ex ? "Editar Exercício (Ditado)" : "Novo Exercício (Ditado)";
+    document.getElementById('dictation-exercise-form').reset();
+
+    const parts = (ex?.title || '').split('|');
+    document.getElementById('dictation-exercise-title').value = parts[0] || '';
+    setCardColorPickerValue('dictation-exercise-color-picker', 'dictation-exercise-color', 'dictation-exercise-color-custom', parts[1] || 'pink');
+    document.getElementById('dictation-text-size').value = ex?.syllablesSize || MIRROR_DEFAULT_TEXT_SIZE;
+    document.getElementById('dictation-text-color').value = ex?.syllablesColor || '#1f1f1f';
+    document.getElementById('dictation-font').value = ex?.syllablesFont || "'Outfit', sans-serif";
+    document.getElementById('dictation-mode').value = ex?.dictationMode || 'copy';
+
+    const companyGroup = document.getElementById('dictation-exercise-target-company-group');
+    if (companyGroup) {
+        companyGroup.style.display = isAdmin ? '' : 'none';
+        if (isAdmin) populateExerciseCompanySelect('dictation-exercise-target-company', ex?.companyId || null);
+    }
+
+    const container = document.getElementById('dictation-items-container');
+    container.innerHTML = '';
+    if (!ex) { addDictationItemBlock(); return; }
+    ex.items.forEach(item => {
+        const blockEl = addDictationItemBlock(true);
+        blockEl.querySelector('.dictation-item-phrase').innerHTML = sanitizeWordHtml(item.word || '');
+    });
+}
+
+function openEditDictationExercise(ex) {
+    openDictationExerciseModal(ex);
+}
+
 function openEditSyllablesExercise(ex) {
     currentEditingSyllablesExerciseId = ex.id;
     currentEditingSyllablesExerciseFromSupabase = !!ex.fromSupabase;
@@ -6504,6 +6635,47 @@ function setupModals() {
         const targetCompanyId = isAdmin ? (document.getElementById('mirror-exercise-target-company')?.value || null) : null;
         saveMirrorExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, itemsArray, targetDoctorUserId, targetCompanyId);
         closeMirrorExerciseUpload();
+    });
+
+    // Exercício Ditado — mesmo fluxo do Espelho.
+    document.getElementById('btn-create-dictation-exercise').addEventListener('click', () => {
+        closeExerciseType();
+        openDictationExerciseModal();
+    });
+    const closeDictationExerciseUpload = () => { document.getElementById('dictation-exercise-modal').style.display = 'none'; document.getElementById('dictation-exercise-form').reset(); };
+    document.getElementById('btn-close-dictation-exercise').addEventListener('click', closeDictationExerciseUpload);
+    document.getElementById('btn-cancel-dictation-exercise').addEventListener('click', closeDictationExerciseUpload);
+    document.getElementById('btn-add-dictation-item').addEventListener('click', () => addDictationItemBlock(true));
+
+    document.getElementById('dictation-exercise-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!isAdmin && !isDoctor) {
+            alert('Apenas administradores ou médicos podem salvar exercícios.');
+            return;
+        }
+        const titleVal = document.getElementById('dictation-exercise-title').value.trim();
+        const colorVal = document.getElementById('dictation-exercise-color').value;
+        const finalTitle = `${titleVal}|${colorVal}`;
+        const sizeVal = document.getElementById('dictation-text-size').value;
+        const colorTextVal = document.getElementById('dictation-text-color').value;
+        const fontVal = document.getElementById('dictation-font').value;
+        const modeVal = document.getElementById('dictation-mode').value === 'dictation' ? 'dictation' : 'copy';
+
+        const blocks = document.querySelectorAll('#dictation-items-container .dictation-item-block');
+        if (blocks.length === 0) return alert("Adicione pelo menos uma frase.");
+        const itemsArray = [];
+        let missingPhrase = false;
+        blocks.forEach(block => {
+            const phraseHtml = sanitizeWordHtml(block.querySelector('.dictation-item-phrase').innerHTML);
+            if (!stripWordHtml(phraseHtml).trim()) missingPhrase = true;
+            itemsArray.push({ word: phraseHtml });
+        });
+        if (missingPhrase) return alert("Toda frase deste exercício precisa estar preenchida.");
+
+        const targetDoctorUserId = isDoctor ? currentUserId : null;
+        const targetCompanyId = isAdmin ? (document.getElementById('dictation-exercise-target-company')?.value || null) : null;
+        saveDictationExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, modeVal, itemsArray, targetDoctorUserId, targetCompanyId);
+        closeDictationExerciseUpload();
     });
 
     document.getElementById('syllables-exercise-form').addEventListener('submit', (e) => {
@@ -7640,6 +7812,10 @@ function closeGame() {
     if (elMirror) elMirror.style.display = 'none';
     stopMirror();
 
+    const elDictation = document.getElementById('game-dictation-container');
+    if (elDictation) elDictation.style.display = 'none';
+    activeDictationExercise = null;
+
     document.getElementById('complete-sentence-frame')?.contentWindow?.postMessage({ type: 'complete-sentence:pause-audio' }, window.location.origin);
     document.getElementById('monte-frase-frame')?.contentWindow?.postMessage({ type: 'monte-frase:pause-audio' }, window.location.origin);
 
@@ -8138,6 +8314,246 @@ function setupMirrorControls() {
     });
     document.getElementById('btn-mirror-prev').addEventListener('click', () => goToMirrorPhrase(mirrorIndex - 1));
     document.getElementById('btn-mirror-next').addEventListener('click', () => goToMirrorPhrase(mirrorIndex + 1));
+}
+
+// =============================================
+// DITADO (tipo de exercício, game_kind 'dictation') — atividade de avaliação:
+// a pessoa vê e ouve a frase e escreve. No modo 'dictation' a frase some
+// quando ela começa a escrever (fica só o 🔊). Ao Conferir, a resposta é
+// comparada palavra a palavra (sem diferenciar maiúscula nem pontuação;
+// acento conta) e vira uma linha em activity_results, com o que foi escrito,
+// o acerto em %, quantas vezes ouviu e o tempo — é o que o médico vê na aba
+// Evolução. Só grava resposta de paciente logado (médico/admin testando não).
+// =============================================
+let dictationPhrases = []; // [{ html, text }] do exercício aberto
+let activeDictationExercise = null;
+let dictationIndex = 0;
+let dictationSessionId = null;
+let dictationAccuracies = []; // acerto de cada frase respondida nesta rodada
+let dictationListens = 0;
+let dictationStartedAt = 0;
+let dictationAnswered = false;
+
+function openDictationExercise(ex) {
+    if (!ex.items || ex.items.length === 0) return;
+    activeDictationExercise = ex;
+    dictationPhrases = ex.items.map(item => {
+        const html = sanitizeWordHtml(item.word || '');
+        return { html, text: stripWordHtml(html).trim() };
+    });
+
+    document.getElementById('grid-exercises').style.display = 'none';
+    document.getElementById('exercises-header').style.display = 'none';
+    document.getElementById('btn-exercises-back').style.display = 'flex';
+    document.getElementById('game-dictation-container').style.display = 'flex';
+
+    const displayTitle = (ex.title || '').split('|')[0] || 'Ditado';
+    document.getElementById('dictation-deck-title').textContent = displayTitle;
+    const phraseEl = document.getElementById('dictation-phrase');
+    const size = parseInt(ex.syllablesSize, 10) || MIRROR_DEFAULT_TEXT_SIZE;
+    phraseEl.style.fontSize = `min(${size}px, 11vw)`;
+    phraseEl.style.color = ex.syllablesColor || '';
+    phraseEl.style.fontFamily = ex.syllablesFont || '';
+    document.getElementById('dictation-answer').style.fontFamily = ex.syllablesFont || '';
+
+    startUsageActivity(displayTitle, {
+        key: `exercise:${ex.id || displayTitle}`,
+        group: 'Exercícios',
+        view: 'view-exercises',
+        detail: 'Exercício aberto'
+    });
+
+    startDictationRound();
+}
+
+// Cada rodada (abrir ou "Fazer de novo") é uma sessão na aba Evolução.
+function startDictationRound() {
+    dictationSessionId = makeUsageId('ditado');
+    dictationIndex = 0;
+    dictationAccuracies = [];
+    document.getElementById('dictation-play').style.display = '';
+    document.getElementById('dictation-summary').style.display = 'none';
+    renderDictationPhrase();
+}
+
+function isDictationHiddenMode() {
+    return activeDictationExercise?.dictationMode === 'dictation';
+}
+
+function renderDictationPhrase() {
+    const item = dictationPhrases[dictationIndex];
+    if (!item) return;
+    const phraseEl = document.getElementById('dictation-phrase');
+    phraseEl.innerHTML = item.html;
+    phraseEl.classList.remove('is-hidden');
+    document.getElementById('dictation-progress').textContent = `${dictationIndex + 1} / ${dictationPhrases.length}`;
+    document.getElementById('dictation-hint').textContent = isDictationHiddenMode()
+        ? 'Ouça e leia a frase. Quando você começar a escrever, ela some — dá pra ouvir de novo no botão de som.'
+        : 'Ouça, leia e escreva a frase abaixo.';
+
+    const answer = document.getElementById('dictation-answer');
+    answer.value = '';
+    answer.disabled = false;
+    answer.classList.remove('is-locked');
+    const feedback = document.getElementById('dictation-feedback');
+    feedback.style.display = 'none';
+    feedback.innerHTML = '';
+    const checkBtn = document.getElementById('btn-dictation-check');
+    checkBtn.style.display = '';
+    checkBtn.disabled = true;
+    document.getElementById('btn-dictation-next').style.display = 'none';
+
+    dictationListens = 0;
+    dictationAnswered = false;
+    dictationStartedAt = Date.now();
+    const nextItem = dictationPhrases[dictationIndex + 1];
+    if (nextItem) prefetchTts(nextItem.text);
+    playDictationAudio();
+}
+
+function playDictationAudio() {
+    const item = dictationPhrases[dictationIndex];
+    if (!item) return;
+    dictationListens += 1;
+    speak(item.text);
+}
+
+// Palavras da frase pra comparar: separa por espaço e, em cada uma, ignora
+// maiúscula e pontuação ("Bom dia!" = "bom dia"); acento continua contando.
+function dictationTokens(text) {
+    return (text || '').split(/\s+/)
+        .map(raw => ({ raw, norm: raw.toLocaleLowerCase('pt-BR').replace(/[^\p{L}\p{N}]/gu, '') }))
+        .filter(token => token.norm);
+}
+
+// Alinha a resposta com a frase palavra a palavra e marca cada palavra da
+// frase como certa, errada ou faltando. Trocar uma palavra custa o mesmo que
+// apagar e escrever outra, então o alinhamento é o que tem mais palavras
+// certas. Acerto = palavras certas sobre o maior dos dois tamanhos (palavra a
+// mais também desconta); erros = palavras da frase não acertadas + sobras.
+function compareDictation(target, answer) {
+    const t = dictationTokens(target);
+    const a = dictationTokens(answer);
+    const cost = (i, j) => (t[i - 1].norm === a[j - 1].norm ? 0 : 2);
+    const d = Array.from({ length: t.length + 1 }, (_, i) => Array.from({ length: a.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+    for (let i = 1; i <= t.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+            d[i][j] = Math.min(d[i - 1][j - 1] + cost(i, j), d[i - 1][j] + 1, d[i][j - 1] + 1);
+        }
+    }
+    const status = new Array(t.length).fill('missing');
+    let i = t.length, j = a.length, extras = 0;
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && d[i][j] === d[i - 1][j - 1] + cost(i, j)) {
+            status[i - 1] = cost(i, j) === 0 ? 'ok' : 'wrong';
+            i--; j--;
+        } else if (i > 0 && d[i][j] === d[i - 1][j] + 1) {
+            status[i - 1] = 'missing';
+            i--;
+        } else {
+            extras++;
+            j--;
+        }
+    }
+    const correct = status.filter(value => value === 'ok').length;
+    const size = Math.max(t.length, a.length);
+    return {
+        words: t.map((token, index) => ({ text: token.raw, status: status[index] })),
+        correct,
+        errors: t.length - correct + extras,
+        accuracy: size ? Math.round((100 * correct) / size) : 0
+    };
+}
+
+function checkDictationAnswer() {
+    const item = dictationPhrases[dictationIndex];
+    const answerEl = document.getElementById('dictation-answer');
+    const answer = answerEl.value.trim();
+    if (!item || !answer || dictationAnswered) return;
+    dictationAnswered = true;
+    const seconds = Math.max(0, Math.round((Date.now() - dictationStartedAt) / 1000));
+    const result = compareDictation(item.text, answer);
+    dictationAccuracies.push(result.accuracy);
+    logDictationResult(item, answer, result, seconds);
+
+    answerEl.disabled = true;
+    answerEl.classList.add('is-locked');
+    document.getElementById('dictation-phrase').classList.remove('is-hidden');
+
+    const feedback = document.getElementById('dictation-feedback');
+    feedback.innerHTML = '';
+    const title = document.createElement('strong');
+    title.className = 'dictation-feedback-title ' + (result.accuracy === 100 ? 'is-ok' : 'is-partial');
+    title.textContent = result.accuracy === 100 ? 'Muito bem, está certinho!' : `Você acertou ${result.correct} de ${result.words.length} palavras.`;
+    const words = document.createElement('p');
+    words.className = 'dictation-feedback-words';
+    result.words.forEach(word => {
+        const span = document.createElement('span');
+        span.className = `dictation-word is-${word.status}`;
+        span.textContent = word.text;
+        span.title = word.status === 'ok' ? 'Certa' : word.status === 'wrong' ? 'Escrita diferente' : 'Faltou';
+        words.append(span, ' ');
+    });
+    feedback.append(title, words);
+    feedback.style.display = '';
+
+    document.getElementById('btn-dictation-check').style.display = 'none';
+    const nextBtn = document.getElementById('btn-dictation-next');
+    nextBtn.querySelector('span').textContent = dictationIndex >= dictationPhrases.length - 1 ? 'Ver resultado' : 'Próxima frase';
+    nextBtn.style.display = '';
+    nextBtn.focus();
+}
+
+function logDictationResult(item, answer, result, seconds) {
+    if (!supabaseClient || isAdmin || isDoctor || !currentPatientId) return;
+    supabaseClient.from('activity_results').insert([{
+        patient_id: currentPatientId,
+        activity: 'dictation',
+        exercise_id: activeDictationExercise?.fromSupabase ? activeDictationExercise.id : null,
+        session_id: dictationSessionId,
+        item_text: item.text,
+        answer_text: answer,
+        accuracy: result.accuracy,
+        listens: dictationListens,
+        moves: result.errors,
+        hints: 0,
+        seconds
+    }]).then(({ error }) => {
+        if (error) console.warn('Ditado: não consegui registrar o resultado:', error);
+    });
+}
+
+function showDictationSummary() {
+    document.getElementById('dictation-play').style.display = 'none';
+    document.getElementById('dictation-summary').style.display = '';
+    const total = dictationAccuracies.length;
+    const perfect = dictationAccuracies.filter(value => value === 100).length;
+    const average = total ? Math.round(dictationAccuracies.reduce((sum, value) => sum + value, 0) / total) : 0;
+    document.getElementById('dictation-summary-text').textContent =
+        `Você escreveu ${perfect} de ${total} ${total === 1 ? 'frase' : 'frases'} sem erro. Acerto médio: ${average}%.`;
+}
+
+function setupDictationControls() {
+    const answer = document.getElementById('dictation-answer');
+    answer.addEventListener('input', () => {
+        document.getElementById('btn-dictation-check').disabled = !answer.value.trim();
+        if (isDictationHiddenMode() && answer.value.trim()) document.getElementById('dictation-phrase').classList.add('is-hidden');
+    });
+    // Enter confere (Shift+Enter quebra linha, caso a frase seja longa).
+    answer.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' && !ev.shiftKey) {
+            ev.preventDefault();
+            checkDictationAnswer();
+        }
+    });
+    document.getElementById('btn-dictation-check').addEventListener('click', checkDictationAnswer);
+    document.getElementById('btn-dictation-listen').addEventListener('click', playDictationAudio);
+    document.getElementById('btn-dictation-next').addEventListener('click', () => {
+        if (dictationIndex >= dictationPhrases.length - 1) return showDictationSummary();
+        dictationIndex += 1;
+        renderDictationPhrase();
+    });
+    document.getElementById('btn-dictation-restart').addEventListener('click', startDictationRound);
 }
 
 // =============================================
@@ -16122,12 +16538,13 @@ async function openPatientExercisesModal(patient) {
 
         const label = document.createElement('span');
         label.textContent = displayTitle;
-        // Conjunto do Monte a Frase tem nome livre ("teste", "Na cozinha"):
-        // a etiqueta diz de que exercício se trata.
-        if (ex.game_kind === 'monte-frase') {
+        // Conjunto do Monte a Frase e Ditado têm nome livre ("teste", "Na
+        // cozinha"): a etiqueta diz de que exercício se trata.
+        const kindTag = { 'monte-frase': 'Monte a Frase', dictation: 'Ditado' }[ex.game_kind];
+        if (kindTag) {
             const tag = document.createElement('span');
             tag.className = 'release-kind-tag';
-            tag.textContent = 'Monte a Frase';
+            tag.textContent = kindTag;
             label.prepend(tag);
         }
 
@@ -16648,10 +17065,12 @@ document.getElementById('btn-close-patient-exercises')?.addEventListener('click'
 // =============================================
 // EVOLUÇÃO DO PACIENTE (activity_results)
 // Cada frase montada no Monte a Frase grava movimentos, pistas e segundos
-// (monte-frase.js → logResult). Na aba "Evolução" (Meus Pacientes do médico
-// e painel do admin) isso aparece agrupado por sessão — cada vez que o
-// paciente abriu o exercício — num gráfico de médias por frase, na lista de
-// sessões e nas frases com mais dificuldade.
+// (monte-frase.js → logResult); cada frase do Ditado grava o que o paciente
+// escreveu, o acerto em %, quantas vezes ouviu e o tempo (logDictationResult).
+// Na aba "Evolução" (Meus Pacientes do médico e painel do admin) isso aparece
+// agrupado por sessão — cada vez que o paciente abriu o exercício — num
+// gráfico de médias por frase, na lista de sessões e nas frases com mais
+// dificuldade; no Ditado, também a lista de respostas.
 // A RLS já limita a leitura aos pacientes do médico / da clínica.
 // =============================================
 let patientEvolutionChart = null;
@@ -16677,7 +17096,13 @@ function groupEvolutionSessions(rows) {
         const moves = session.items.reduce((sum, item) => sum + item.moves, 0);
         const hints = session.items.reduce((sum, item) => sum + item.hints, 0);
         const seconds = session.items.reduce((sum, item) => sum + item.seconds, 0);
-        return { startedAt: session.startedAt, count, moves, hints, seconds, movesAvg: moves / count, hintsAvg: hints / count };
+        const accuracy = session.items.reduce((sum, item) => sum + (item.accuracy || 0), 0);
+        const listens = session.items.reduce((sum, item) => sum + (item.listens || 0), 0);
+        const perfect = session.items.filter(item => item.accuracy === 100).length;
+        return {
+            startedAt: session.startedAt, count, moves, hints, seconds, perfect,
+            movesAvg: moves / count, hintsAvg: hints / count, accuracyAvg: accuracy / count, listensAvg: listens / count
+        };
     });
 }
 
@@ -16709,7 +17134,19 @@ function evolutionTable(headers, rows) {
     return wrap;
 }
 
-function renderEvolutionChart(canvas, sessions) {
+// Padrão do gráfico é o do Monte a Frase; o Ditado passa as séries e o eixo dele.
+const MONTE_FRASE_CHART = {
+    series: [
+        ['Movimentos por frase', '#2a78d6', session => session.movesAvg],
+        ['Pistas por frase', '#eb6834', session => session.hintsAvg]
+    ],
+    yTitle: 'média por frase',
+    yMax: undefined,
+    countLabel: 'Frases montadas',
+    formatValue: formatEvolutionAverage
+};
+
+function renderEvolutionChart(canvas, sessions, config = MONTE_FRASE_CHART) {
     if (patientEvolutionChart) patientEvolutionChart.destroy();
     patientEvolutionChart = null;
     if (typeof Chart === 'undefined') return;
@@ -16722,10 +17159,7 @@ function renderEvolutionChart(canvas, sessions) {
         type: 'line',
         data: {
             labels,
-            datasets: [
-                series('Movimentos por frase', '#2a78d6', sessions.map(session => Number(session.movesAvg.toFixed(1)))),
-                series('Pistas por frase', '#eb6834', sessions.map(session => Number(session.hintsAvg.toFixed(1))))
-            ]
+            datasets: config.series.map(([label, color, value]) => series(label, color, sessions.map(session => Number(value(session).toFixed(1)))))
         },
         options: {
             responsive: true,
@@ -16736,15 +17170,15 @@ function renderEvolutionChart(canvas, sessions) {
                 tooltip: {
                     callbacks: {
                         title: items => `Sessão de ${new Date(sessions[items[0].dataIndex].startedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`,
-                        label: item => `${item.dataset.label}: ${formatEvolutionAverage(item.parsed.y)}`,
-                        afterBody: items => `Frases montadas: ${sessions[items[0].dataIndex].count}`
+                        label: item => `${item.dataset.label}: ${config.formatValue(item.parsed.y)}`,
+                        afterBody: items => `${config.countLabel}: ${sessions[items[0].dataIndex].count}`
                     }
                 }
             },
             scales: {
                 x: { grid: { display: false }, ticks: { color: '#52514e' } },
-                y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.06)' }, ticks: { color: '#52514e', precision: 0 },
-                    title: { display: true, text: 'média por frase', color: '#52514e' } }
+                y: { beginAtZero: true, max: config.yMax, grid: { color: 'rgba(0,0,0,0.06)' }, ticks: { color: '#52514e', precision: 0 },
+                    title: { display: true, text: config.yTitle, color: '#52514e' } }
             }
         }
     });
@@ -16786,17 +17220,24 @@ async function loadEvolutionTab(prefix) {
         select.appendChild(option);
     });
     select.value = patients.some(p => p.id === previous) ? previous : '';
-    renderPatientEvolution(body, select.value);
+    renderPatientEvolution(body, select.value, document.getElementById(`${prefix}-evolution-activity`)?.value);
 }
 
 ['doctor', 'admin'].forEach(prefix => {
     const body = () => document.getElementById(`${prefix}-evolution-body`);
     const select = document.getElementById(`${prefix}-evolution-patient`);
-    select?.addEventListener('change', () => renderPatientEvolution(body(), select.value));
-    document.getElementById(`btn-refresh-${prefix}-evolution`)?.addEventListener('click', () => renderPatientEvolution(body(), select.value));
+    const activity = document.getElementById(`${prefix}-evolution-activity`);
+    const refresh = () => renderPatientEvolution(body(), select.value, activity?.value);
+    select?.addEventListener('change', refresh);
+    activity?.addEventListener('change', refresh);
+    document.getElementById(`btn-refresh-${prefix}-evolution`)?.addEventListener('click', refresh);
 });
 
-async function renderPatientEvolution(body, patientUserId) {
+const EVOLUTION_ACTIVITY_NAMES = { 'monte-frase': 'Monte a Frase', dictation: 'Ditado' };
+
+async function renderPatientEvolution(body, patientUserId, activity = 'monte-frase') {
+    if (!EVOLUTION_ACTIVITY_NAMES[activity]) activity = 'monte-frase';
+    const activityName = EVOLUTION_ACTIVITY_NAMES[activity];
     if (!body) return;
     // Troca rápida de paciente: só a última consulta pinta a tela.
     const requestId = String(Date.now() + Math.random());
@@ -16806,7 +17247,7 @@ async function renderPatientEvolution(body, patientUserId) {
     if (!patientUserId) {
         const hint = document.createElement('p');
         hint.className = 'media-hint';
-        hint.textContent = 'Escolha um paciente acima para ver a evolução dele no Monte a Frase.';
+        hint.textContent = `Escolha um paciente acima para ver a evolução dele no ${activityName}.`;
         body.appendChild(hint);
         return;
     }
@@ -16814,9 +17255,9 @@ async function renderPatientEvolution(body, patientUserId) {
 
     const { data: rows, error } = await supabaseClient
         .from('activity_results')
-        .select('created_at, session_id, exercise_id, item_text, moves, hints, seconds')
+        .select('created_at, session_id, exercise_id, item_text, moves, hints, seconds, answer_text, accuracy, listens')
         .eq('user_id', patientUserId)
-        .eq('activity', 'monte-frase')
+        .eq('activity', activity)
         .order('created_at', { ascending: true })
         .limit(5000);
     if (body.dataset.requestId !== requestId) return;
@@ -16828,7 +17269,9 @@ async function renderPatientEvolution(body, patientUserId) {
     if (!rows || !rows.length) {
         const empty = document.createElement('p');
         empty.className = 'media-hint';
-        empty.textContent = 'Ainda não há registros. Os resultados aparecem depois que o paciente montar frases no Monte a Frase.';
+        empty.textContent = activity === 'dictation'
+            ? 'Ainda não há registros. Os resultados aparecem depois que o paciente escrever frases no Ditado.'
+            : 'Ainda não há registros. Os resultados aparecem depois que o paciente montar frases no Monte a Frase.';
         body.appendChild(empty);
         return;
     }
@@ -16839,7 +17282,7 @@ async function renderPatientEvolution(body, patientUserId) {
     const details = document.createElement('div');
     if (new Set(rows.map(row => row.exercise_id ?? null)).size < 2) {
         body.appendChild(details);
-        renderEvolutionDetails(details, rows);
+        renderEvolutionDetails(details, rows, activity);
         return;
     }
     const { data: decks } = await supabaseClient.from('exercises').select('id, title').in('id', deckIds);
@@ -16855,15 +17298,16 @@ async function renderPatientEvolution(body, patientUserId) {
         filter.appendChild(option);
     });
     const paint = () => renderEvolutionDetails(details,
-        filter.value === 'all' ? rows : rows.filter(row => String(row.exercise_id) === filter.value));
+        filter.value === 'all' ? rows : rows.filter(row => String(row.exercise_id) === filter.value), activity);
     filter.addEventListener('change', paint);
     body.append(filter, details);
     paint();
 }
 
-function renderEvolutionDetails(body, rows) {
+function renderEvolutionDetails(body, rows, activity = 'monte-frase') {
     if (patientEvolutionChart) { patientEvolutionChart.destroy(); patientEvolutionChart = null; }
     body.innerHTML = '';
+    if (activity === 'dictation') return renderDictationEvolutionDetails(body, rows);
     const sessions = groupEvolutionSessions(rows);
     const totalSeconds = rows.reduce((sum, row) => sum + row.seconds, 0);
 
@@ -16933,6 +17377,107 @@ function renderEvolutionDetails(body, rows) {
     body.appendChild(evolutionTable(
         ['Frase', 'Vezes', 'Movimentos (média)', 'Pistas (média)'],
         hardest.map(item => [item.text, item.attempts, formatEvolutionAverage(item.movesAvg), formatEvolutionAverage(item.hintsAvg)])
+    ));
+}
+
+function appendEvolutionSummary(body, tiles) {
+    const summary = document.createElement('div');
+    summary.className = 'evolution-summary';
+    tiles.forEach(([value, label]) => {
+        const tile = document.createElement('div');
+        const strong = document.createElement('strong');
+        strong.textContent = value;
+        const span = document.createElement('span');
+        span.textContent = label;
+        tile.append(strong, span);
+        summary.appendChild(tile);
+    });
+    body.appendChild(summary);
+}
+
+function appendEvolutionTitle(body, text) {
+    const title = document.createElement('h3');
+    title.className = 'evolution-section-title';
+    title.textContent = text;
+    body.appendChild(title);
+}
+
+const formatEvolutionPercent = value => `${Math.round(value)}%`;
+
+// Ditado: acerto médio por sessão, lista de sessões, todas as respostas (o
+// que o paciente escreveu em cada frase) e as frases com menor acerto.
+function renderDictationEvolutionDetails(body, rows) {
+    const sessions = groupEvolutionSessions(rows);
+    const totalSeconds = rows.reduce((sum, row) => sum + row.seconds, 0);
+    const accuracyAvg = rows.reduce((sum, row) => sum + (row.accuracy || 0), 0) / rows.length;
+
+    appendEvolutionSummary(body, [
+        [sessions.length, sessions.length === 1 ? 'sessão' : 'sessões'],
+        [rows.length, 'frases escritas'],
+        [formatEvolutionPercent(accuracyAvg), 'acerto médio'],
+        [formatEvolutionDuration(totalSeconds), 'tempo total']
+    ]);
+
+    appendEvolutionTitle(body, 'Acerto médio em cada sessão (quanto maior, melhor)');
+    const chartWrap = document.createElement('div');
+    chartWrap.className = 'evolution-chart';
+    const canvas = document.createElement('canvas');
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', 'Gráfico do acerto médio por sessão no Ditado; os mesmos números estão na tabela de sessões abaixo.');
+    chartWrap.appendChild(canvas);
+    body.appendChild(chartWrap);
+    renderEvolutionChart(canvas, sessions, {
+        series: [['Acerto médio (%)', '#2a78d6', session => session.accuracyAvg]],
+        yTitle: 'acerto (%)',
+        yMax: 100,
+        countLabel: 'Frases escritas',
+        formatValue: formatEvolutionPercent
+    });
+
+    appendEvolutionTitle(body, 'Sessões');
+    body.appendChild(evolutionTable(
+        ['Data', 'Frases', 'Sem erro', 'Acerto médio', 'Ouviu (média)', 'Tempo'],
+        [...sessions].reverse().map(session => [
+            new Date(session.startedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+            session.count,
+            session.perfect,
+            formatEvolutionPercent(session.accuracyAvg),
+            formatEvolutionAverage(session.listensAvg),
+            formatEvolutionDuration(session.seconds)
+        ])
+    ));
+
+    appendEvolutionTitle(body, 'Respostas (mais recentes primeiro)');
+    const answersTable = body.appendChild(evolutionTable(
+        ['Data', 'Frase', 'O que escreveu', 'Acerto', 'Ouviu', 'Tempo'],
+        [...rows].reverse().map(row => [
+            new Date(row.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+            row.item_text,
+            row.answer_text || '',
+            row.accuracy == null ? '-' : `${row.accuracy}%`,
+            row.listens ?? '-',
+            formatEvolutionDuration(row.seconds)
+        ])
+    ));
+    answersTable.classList.add('evolution-table-scroll');
+
+    const byText = new Map();
+    rows.forEach(row => {
+        const entry = byText.get(row.item_text) || { attempts: 0, accuracy: 0 };
+        entry.attempts += 1;
+        entry.accuracy += row.accuracy || 0;
+        byText.set(row.item_text, entry);
+    });
+    const hardest = [...byText.entries()]
+        .map(([text, entry]) => ({ text, attempts: entry.attempts, accuracyAvg: entry.accuracy / entry.attempts }))
+        .filter(item => item.accuracyAvg < 100)
+        .sort((a, b) => a.accuracyAvg - b.accuracyAvg)
+        .slice(0, 8);
+    if (!hardest.length) return;
+    appendEvolutionTitle(body, 'Frases com mais dificuldade');
+    body.appendChild(evolutionTable(
+        ['Frase', 'Vezes', 'Acerto (média)'],
+        hardest.map(item => [item.text, item.attempts, formatEvolutionPercent(item.accuracyAvg)])
     ));
 }
 
