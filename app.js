@@ -676,7 +676,14 @@ function formatUsageActivityDisplayLabel(label) {
     const cleanLabel = normalizeUsageActivityLabel(label);
     if (!cleanLabel) return 'Atividade';
 
-    const prefixes = ['Jogo:', 'Exercício:', 'Nomeação:', 'Compositor:', 'Palavra:', 'Tela:'];
+    // Botões da barra de mensagem (🔊 falar, 🗑 limpar): sem o contexto, "Falar"
+    // e "Limpar" pareciam nomes de atividade na tabela de uso.
+    if (cleanLabel.toLowerCase().startsWith('compositor:')) {
+        const action = cleanLabel.slice('compositor:'.length).trim();
+        return action ? `Barra de mensagem: ${action}` : 'Barra de mensagem';
+    }
+
+    const prefixes = ['Jogo:', 'Exercício:', 'Nomeação:', 'Palavra:', 'Tela:'];
     for (const prefix of prefixes) {
         if (cleanLabel.toLowerCase().startsWith(prefix.toLowerCase())) {
             const raw = cleanLabel.slice(prefix.length).trim();
