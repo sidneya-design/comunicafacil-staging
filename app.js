@@ -3988,7 +3988,8 @@ function renderExerciseCards(exercisesArray) {
     // cuidado que renderMediaCards já toma pra mídias.
     const inDoctorPatientContext = isDoctor && activePatientContext;
     const baseExercises = isDoctor
-        ? realExercises.filter(ex => !ex.patientId || (inDoctorPatientContext && ex.patientId === activePatientContext.id))
+        ? realExercises.filter(ex => (!ex.patientId || (inDoctorPatientContext && ex.patientId === activePatientContext.id))
+            && !isUnpublishedAdminExercise(ex))
         : realExercises;
 
     // Reconhecimento de Palavras (e, no futuro, de Imagem) agora pode ter
@@ -14378,6 +14379,18 @@ let currentUserCompanyId = null; // company_id do médico logado (company_member
 // da empresa (colegas) + conteúdo global do admin. Sem o ramo de empresa,
 // mesmo com company_id preenchido e a RLS já permitindo o SELECT, essa
 // lista client-side escondia o que os colegas criaram.
+// Exercício do admin (sem médico dono nem paciente) que ele ainda não
+// publicou (olhinho desligado, visible = false): o médico não vê nem pode
+// liberar pra paciente. Contêineres de jogo (seed_key) ficam de fora: a
+// publicação deles é a dos jogos, não esta coluna. Aceita a linha crua do
+// Supabase ou o objeto já convertido do app.
+function isUnpublishedAdminExercise(ex) {
+    const doctorUserId = ex.doctorUserId ?? ex.doctor_user_id;
+    const patientId = ex.patientId ?? ex.patient_id;
+    const seedKey = ex.seedKey ?? ex.seed_key;
+    return !doctorUserId && !patientId && !seedKey && ex.visible === false;
+}
+
 function doctorBankOrFilter() {
     const companyClause = currentUserCompanyId ? `,company_id.eq.${currentUserCompanyId}` : '';
     return `doctor_user_id.eq.${currentUserId}${companyClause},and(doctor_user_id.is.null,company_id.is.null,patient_id.is.null)`;
@@ -16531,7 +16544,7 @@ async function openPatientExercisesModal(patient) {
     // 21: conteúdo global deixou de ser automático pro paciente — o médico
     // precisa liberar também, mesma lista/mecanismo do banco próprio).
     const { data: myExercises } = await supabaseClient
-        .from('exercises').select('id, title, seed_key, doctor_user_id, game_kind')
+        .from('exercises').select('id, title, seed_key, doctor_user_id, patient_id, game_kind, visible')
         .or(doctorBankOrFilter())
         .order('title');
     const { data: overrides } = await supabaseClient
@@ -16560,8 +16573,9 @@ async function openPatientExercisesModal(patient) {
 
     // Os bancos únicos do Monte a Frase de antes dos conjuntos ficaram no
     // banco sem conversão (decisão do usuário) — não aparecem pra liberar.
+    // Exercício do admin ainda não publicado não aparece pra liberar.
     const allEntries = [...(myExercises || []), ...virtualEntries]
-        .filter(ex => !isGameContainerSeedKey(ex.seed_key, MONTE_FRASE_SEED_KEY));
+        .filter(ex => !isGameContainerSeedKey(ex.seed_key, MONTE_FRASE_SEED_KEY) && !isUnpublishedAdminExercise(ex));
 
     list.innerHTML = '';
     if (!allEntries.length) {
