@@ -8330,7 +8330,9 @@ let dictationPhrases = []; // [{ html, text }] do exercício aberto
 let activeDictationExercise = null;
 let dictationIndex = 0;
 let dictationSessionId = null;
-let dictationAccuracies = []; // acerto de cada frase respondida nesta rodada
+// Por frase desta rodada: acerto da 1ª tentativa, da última e quantas foram.
+let dictationOutcomes = [];
+let dictationAttempt = 1; // tentativa atual da frase (refazer soma 1)
 let dictationListens = 0;
 let dictationStartedAt = 0;
 let dictationFirstKeyAt = 0; // primeira tecla da frase atual (0 = ainda não escreveu)
@@ -8373,7 +8375,7 @@ function openDictationExercise(ex) {
 function startDictationRound() {
     dictationSessionId = makeUsageId('ditado');
     dictationIndex = 0;
-    dictationAccuracies = [];
+    dictationOutcomes = [];
     document.getElementById('dictation-play').style.display = '';
     document.getElementById('dictation-summary').style.display = 'none';
     renderDictationPhrase();
@@ -8383,9 +8385,13 @@ function isDictationHiddenMode() {
     return activeDictationExercise?.dictationMode === 'dictation';
 }
 
-function renderDictationPhrase() {
+// retry = "Tentar de novo" na mesma frase: limpa a resposta, mostra a frase
+// de novo (no modo ditado ela volta a sumir quando a pessoa escreve) e toca o
+// áudio outra vez; a tentativa vira outra linha na Evolução.
+function renderDictationPhrase(retry = false) {
     const item = dictationPhrases[dictationIndex];
     if (!item) return;
+    dictationAttempt = retry ? dictationAttempt + 1 : 1;
     const phraseEl = document.getElementById('dictation-phrase');
     phraseEl.innerHTML = item.html;
     phraseEl.classList.remove('is-hidden');
@@ -8405,6 +8411,7 @@ function renderDictationPhrase() {
     checkBtn.style.display = '';
     checkBtn.disabled = true;
     document.getElementById('btn-dictation-next').style.display = 'none';
+    document.getElementById('btn-dictation-retry').style.display = 'none';
 
     dictationListens = 0;
     dictationAnswered = false;
@@ -8412,8 +8419,9 @@ function renderDictationPhrase() {
     dictationFirstKeyAt = 0;
     dictationCorrections = 0;
     const nextItem = dictationPhrases[dictationIndex + 1];
-    if (nextItem) prefetchTts(nextItem.text);
+    if (nextItem && !retry) prefetchTts(nextItem.text);
     playDictationAudio();
+    if (retry) answer.focus();
 }
 
 function playDictationAudio() {
@@ -8503,7 +8511,10 @@ function checkDictationAnswer() {
     };
     const result = compareDictation(item.text, answer);
     result.letterErrors = dictationLetterErrors(item.text, answer);
-    dictationAccuracies.push(result.accuracy);
+    const outcome = dictationOutcomes[dictationIndex] || { first: result.accuracy, attempts: 0 };
+    outcome.last = result.accuracy;
+    outcome.attempts += 1;
+    dictationOutcomes[dictationIndex] = outcome;
     logDictationResult(item, answer, result, timing);
 
     answerEl.disabled = true;
@@ -8514,7 +8525,9 @@ function checkDictationAnswer() {
     feedback.innerHTML = '';
     const title = document.createElement('strong');
     title.className = 'dictation-feedback-title ' + (result.accuracy === 100 ? 'is-ok' : 'is-partial');
-    title.textContent = result.accuracy === 100 ? 'Muito bem, está certinho!' : `Você acertou ${result.correct} de ${result.words.length} palavras.`;
+    title.textContent = result.accuracy === 100
+        ? (dictationAttempt > 1 ? 'Muito bem, agora está certinho!' : 'Muito bem, está certinho!')
+        : `Você acertou ${result.correct} de ${result.words.length} palavras. Pode tentar de novo ou seguir.`;
     const words = document.createElement('p');
     words.className = 'dictation-feedback-words';
     result.words.forEach(word => {
@@ -8531,7 +8544,9 @@ function checkDictationAnswer() {
     const nextBtn = document.getElementById('btn-dictation-next');
     nextBtn.querySelector('span').textContent = dictationIndex >= dictationPhrases.length - 1 ? 'Ver resultado' : 'Próxima frase';
     nextBtn.style.display = '';
-    nextBtn.focus();
+    const retryBtn = document.getElementById('btn-dictation-retry');
+    retryBtn.style.display = result.accuracy === 100 ? 'none' : '';
+    (result.accuracy === 100 ? nextBtn : retryBtn).focus();
 }
 
 function logDictationResult(item, answer, result, timing) {
@@ -8551,7 +8566,8 @@ function logDictationResult(item, answer, result, timing) {
         first_key_ms: timing.firstKeyMs,
         typing_ms: timing.typingMs,
         letter_errors: result.letterErrors,
-        corrections: dictationCorrections
+        corrections: dictationCorrections,
+        attempt: dictationAttempt
     }]).then(({ error }) => {
         if (error) console.warn('Ditado: não consegui registrar o resultado:', error);
     });
@@ -8560,11 +8576,14 @@ function logDictationResult(item, answer, result, timing) {
 function showDictationSummary() {
     document.getElementById('dictation-play').style.display = 'none';
     document.getElementById('dictation-summary').style.display = '';
-    const total = dictationAccuracies.length;
-    const perfect = dictationAccuracies.filter(value => value === 100).length;
-    const average = total ? Math.round(dictationAccuracies.reduce((sum, value) => sum + value, 0) / total) : 0;
-    document.getElementById('dictation-summary-text').textContent =
-        `Você escreveu ${perfect} de ${total} ${total === 1 ? 'frase' : 'frases'} sem erro. Acerto médio: ${average}%.`;
+    const outcomes = dictationOutcomes.filter(Boolean);
+    const total = outcomes.length;
+    const perfectFirst = outcomes.filter(outcome => outcome.first === 100).length;
+    const fixedLater = outcomes.filter(outcome => outcome.first < 100 && outcome.last === 100).length;
+    const average = total ? Math.round(outcomes.reduce((sum, outcome) => sum + outcome.first, 0) / total) : 0;
+    let text = `Você escreveu ${perfectFirst} de ${total} ${total === 1 ? 'frase' : 'frases'} sem erro de primeira.`;
+    if (fixedLater) text += ` Refazendo, acertou mais ${fixedLater}.`;
+    document.getElementById('dictation-summary-text').textContent = `${text} Acerto médio na primeira tentativa: ${average}%.`;
 }
 
 function setupDictationControls() {
@@ -8595,6 +8614,7 @@ function setupDictationControls() {
         dictationIndex += 1;
         renderDictationPhrase();
     });
+    document.getElementById('btn-dictation-retry').addEventListener('click', () => renderDictationPhrase(true));
     document.getElementById('btn-dictation-restart').addEventListener('click', startDictationRound);
 }
 
@@ -17312,7 +17332,9 @@ async function renderPatientEvolution(body, patientUserId, activity = 'monte-fra
 
     const { data: rows, error } = await supabaseClient
         .from('activity_results')
-        .select('created_at, session_id, exercise_id, item_text, moves, hints, seconds, answer_text, accuracy, listens, first_key_ms, typing_ms, letter_errors, corrections')
+        .select(activity === 'dictation'
+            ? 'created_at, session_id, exercise_id, item_text, moves, hints, seconds, answer_text, accuracy, listens, first_key_ms, typing_ms, letter_errors, corrections, attempt'
+            : 'created_at, session_id, exercise_id, item_text, moves, hints, seconds')
         .eq('user_id', patientUserId)
         .eq('activity', activity)
         .order('created_at', { ascending: true })
@@ -17447,7 +17469,7 @@ function renderEvolutionDetails(body, rows, activity = 'monte-frase', meta = {})
 
 function appendEvolutionSummary(body, tiles) {
     const summary = document.createElement('div');
-    summary.className = 'evolution-summary';
+    summary.className = 'evolution-summary evolution-summary-dictation';
     tiles.forEach(([value, label]) => {
         const tile = document.createElement('div');
         const strong = document.createElement('strong');
@@ -17480,7 +17502,7 @@ const formatEvolutionOptionalAverage = value => (value == null ? '-' : formatEvo
 // Planilha do Ditado: uma linha por resposta. Ponto e vírgula e BOM pra o
 // Excel em português abrir com acentos e colunas certas.
 function downloadDictationCsv(rows, meta) {
-    const header = ['Paciente', 'Exercício', 'Sessão', 'Data', 'Hora', 'Frase', 'O que escreveu', 'Acerto (%)',
+    const header = ['Paciente', 'Exercício', 'Sessão', 'Data', 'Hora', 'Frase', 'Tentativa', 'O que escreveu', 'Acerto (%)',
         'Palavras com erro', 'Erros de letra', 'Correções (apagou)', 'Vezes que ouviu',
         'Até começar a escrever (s)', 'Escrevendo (s)', 'Tempo na frase (s)'];
     const sessionNumbers = new Map();
@@ -17491,7 +17513,7 @@ function downloadDictationCsv(rows, meta) {
         return [
             meta.patientName || '', meta.deckName ? meta.deckName(row.exercise_id) : '', sessionNumbers.get(row.session_id),
             date.toLocaleDateString('pt-BR'), date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-            row.item_text, row.answer_text || '', row.accuracy ?? '', row.moves ?? '', row.letter_errors ?? '',
+            row.item_text, row.attempt ?? 1, row.answer_text || '', row.accuracy ?? '', row.moves ?? '', row.letter_errors ?? '',
             row.corrections ?? '', row.listens ?? '', seconds(row.first_key_ms), seconds(row.typing_ms), row.seconds
         ];
     });
@@ -17513,8 +17535,44 @@ function downloadDictationCsv(rows, meta) {
 
 // Ditado: acerto médio por sessão, lista de sessões, todas as respostas (o
 // que o paciente escreveu em cada frase) e as frases com menor acerto.
+// Refazer: cada tentativa é uma linha (attempt). Médias, gráfico e "frases
+// com mais dificuldade" usam só a 1ª tentativa de cada frase (sem attempt =
+// resposta de antes do refazer = 1ª); a lista de respostas mostra todas; o
+// tempo soma todas.
+const isFirstDictationAttempt = row => (row.attempt ?? 1) === 1;
+
+// Por sessão: quantas frases foram refeitas e quantas ficaram certas depois.
+function dictationRetryStats(rows) {
+    const byPhrase = new Map();
+    rows.forEach(row => {
+        const key = `${row.session_id}\u0000${row.item_text}`;
+        const entry = byPhrase.get(key) || { sessionId: row.session_id, first: null, retried: false, fixed: false };
+        if (isFirstDictationAttempt(row)) entry.first = row.accuracy;
+        else {
+            entry.retried = true;
+            if (row.accuracy === 100) entry.fixed = true;
+        }
+        byPhrase.set(key, entry);
+    });
+    const bySession = new Map();
+    let retried = 0, fixed = 0;
+    byPhrase.forEach(entry => {
+        if (!entry.retried) return;
+        const session = bySession.get(entry.sessionId) || { retried: 0, fixed: 0 };
+        session.retried += 1;
+        retried += 1;
+        if (entry.fixed) { session.fixed += 1; fixed += 1; }
+        bySession.set(entry.sessionId, session);
+    });
+    return { retried, fixed, bySession };
+}
+
 function renderDictationEvolutionDetails(body, rows, meta = {}) {
-    const sessions = groupEvolutionSessions(rows);
+    const firstRows = rows.filter(isFirstDictationAttempt);
+    const sessions = groupEvolutionSessions(firstRows);
+    const retries = dictationRetryStats(rows);
+    const sessionSeconds = new Map();
+    rows.forEach(row => sessionSeconds.set(row.session_id, (sessionSeconds.get(row.session_id) || 0) + row.seconds));
     const exportBtn = document.createElement('button');
     exportBtn.type = 'button';
     exportBtn.className = 'admin-analytics-action evolution-export-btn';
@@ -17522,20 +17580,21 @@ function renderDictationEvolutionDetails(body, rows, meta = {}) {
     exportBtn.addEventListener('click', () => downloadDictationCsv(rows, meta));
     body.appendChild(exportBtn);
     const totalSeconds = rows.reduce((sum, row) => sum + row.seconds, 0);
-    const accuracyAvg = rows.reduce((sum, row) => sum + (row.accuracy || 0), 0) / rows.length;
+    const accuracyAvg = firstRows.length ? firstRows.reduce((sum, row) => sum + (row.accuracy || 0), 0) / firstRows.length : 0;
 
     appendEvolutionSummary(body, [
         [sessions.length, sessions.length === 1 ? 'sessão' : 'sessões'],
-        [rows.length, 'frases escritas'],
-        [formatEvolutionPercent(accuracyAvg), 'acerto médio'],
+        [firstRows.length, 'frases escritas'],
+        [formatEvolutionPercent(accuracyAvg), 'acerto médio (1ª tentativa)'],
         [formatEvolutionDuration(totalSeconds), 'tempo total'],
-        [formatEvolutionOptionalAverage(averageOf(rows, 'letter_errors')), 'erros de letra por frase'],
-        [formatEvolutionOptionalAverage(averageOf(rows, 'corrections')), 'correções por frase'],
-        [formatEvolutionMs(averageOf(rows, 'first_key_ms')), 'até começar a escrever (média)'],
-        [formatEvolutionMs(averageOf(rows, 'typing_ms')), 'escrevendo (média por frase)']
+        [retries.retried, `frases refeitas (${retries.fixed} certas depois)`],
+        [formatEvolutionOptionalAverage(averageOf(firstRows, 'letter_errors')), 'erros de letra por frase'],
+        [formatEvolutionOptionalAverage(averageOf(firstRows, 'corrections')), 'correções por frase'],
+        [formatEvolutionMs(averageOf(firstRows, 'first_key_ms')), 'até começar a escrever (média)'],
+        [formatEvolutionMs(averageOf(firstRows, 'typing_ms')), 'escrevendo (média por frase)']
     ]);
 
-    appendEvolutionTitle(body, 'Acerto médio em cada sessão (quanto maior, melhor)');
+    appendEvolutionTitle(body, 'Acerto médio na 1ª tentativa, em cada sessão (quanto maior, melhor)');
     const chartWrap = document.createElement('div');
     chartWrap.className = 'evolution-chart';
     const canvas = document.createElement('canvas');
@@ -17553,26 +17612,28 @@ function renderDictationEvolutionDetails(body, rows, meta = {}) {
 
     appendEvolutionTitle(body, 'Sessões');
     body.appendChild(evolutionTable(
-        ['Data', 'Frases', 'Sem erro', 'Acerto médio', 'Erros de letra (média)', 'Correções (média)', 'Ouviu (média)', 'Escrevendo (média)', 'Tempo na atividade'],
+        ['Data', 'Frases', 'Sem erro de primeira', 'Acerto médio', 'Refeitas (certas depois)', 'Erros de letra (média)', 'Correções (média)', 'Ouviu (média)', 'Escrevendo (média)', 'Tempo na atividade'],
         [...sessions].reverse().map(session => [
             new Date(session.startedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
             session.count,
             session.perfect,
             formatEvolutionPercent(session.accuracyAvg),
+            (stats => (stats ? `${stats.retried} (${stats.fixed})` : '0'))(retries.bySession.get(session.items[0].session_id)),
             formatEvolutionOptionalAverage(averageOf(session.items, 'letter_errors')),
             formatEvolutionOptionalAverage(averageOf(session.items, 'corrections')),
             formatEvolutionAverage(session.listensAvg),
             formatEvolutionMs(averageOf(session.items, 'typing_ms')),
-            formatEvolutionDuration(session.seconds)
+            formatEvolutionDuration(sessionSeconds.get(session.items[0].session_id) || session.seconds)
         ])
     ));
 
     appendEvolutionTitle(body, 'Respostas (mais recentes primeiro)');
     const answersTable = body.appendChild(evolutionTable(
-        ['Data', 'Frase', 'O que escreveu', 'Acerto', 'Erros de letra', 'Correções', 'Ouviu', 'Até começar', 'Escrevendo', 'Tempo na frase'],
+        ['Data', 'Frase', 'Tentativa', 'O que escreveu', 'Acerto', 'Erros de letra', 'Correções', 'Ouviu', 'Até começar', 'Escrevendo', 'Tempo na frase'],
         [...rows].reverse().map(row => [
             new Date(row.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
             row.item_text,
+            `${row.attempt ?? 1}ª`,
             row.answer_text || '',
             row.accuracy == null ? '-' : `${row.accuracy}%`,
             row.letter_errors ?? '-',
@@ -17586,7 +17647,7 @@ function renderDictationEvolutionDetails(body, rows, meta = {}) {
     answersTable.classList.add('evolution-table-scroll');
 
     const byText = new Map();
-    rows.forEach(row => {
+    firstRows.forEach(row => {
         const entry = byText.get(row.item_text) || { attempts: 0, accuracy: 0 };
         entry.attempts += 1;
         entry.accuracy += row.accuracy || 0;
