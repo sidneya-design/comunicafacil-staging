@@ -427,6 +427,8 @@ body {
 .exercise-type-option.monte-frase i { color: #4f46e5; }
 .exercise-type-option.mirror { border-color: #fca5a5; }
 .exercise-type-option.mirror i { color: #e53935; }
+.exercise-type-option.dictation { border-color: #fcd34d; }
+.exercise-type-option.dictation i { color: #d97706; }
 
 .reading-text-phrase-block { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
 .reading-text-phrase-input { flex: 1; height: 40px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; padding: 0 12px; font-size: 15px; font-family: inherit; }
@@ -4822,6 +4824,7 @@ button, .action-btn { touch-action: manipulation; }
 .evolution-section-title { font-size: 1rem; margin: 1.1rem 0 0.5rem; color: #1f2933; }
 .evolution-chart { position: relative; height: 260px; }
 .evolution-table-wrap { overflow-x: auto; }
+.evolution-table-scroll { max-height: 420px; overflow-y: auto; }
 .evolution-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .evolution-table th, .evolution-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e3e6ea; }
 .evolution-table th { color: #52514e; font-weight: 600; }
@@ -4961,6 +4964,48 @@ button, .action-btn { touch-action: manipulation; }
     .mirror-right { border-left: none; padding-left: 0; width: 100%; height: auto; }
     .mirror-camera { height: auto; width: 100%; aspect-ratio: 1/1; max-height: 45vh; }
     .mirror-left { height: auto; width: 100%; }
+}
+
+/* Ditado: vê e ouve a frase e escreve (mesmo visual do Espelho) */
+.dictation-game { height: 100%; min-height: 0; flex-direction: column; gap: 10px; background: #fff; border-radius: var(--radius); }
+.dictation-header { flex-shrink: 0; margin-bottom: 0; padding: 10px 14px; justify-content: space-between; }
+.dictation-deck-title { font-size: 1.05rem; color: #29243b; }
+.dictation-body {
+    flex: 1; min-height: 0; overflow-y: auto; width: 100%; max-width: 980px; margin: 0 auto;
+    display: flex; flex-direction: column; justify-content: center; gap: 18px; padding: 10px 24px 24px; box-sizing: border-box;
+}
+.dictation-phrase-row { display: flex; align-items: center; gap: 20px; }
+.dictation-phrase {
+    margin: 0; font-family: 'Outfit', sans-serif; font-weight: 800; color: #1f1f1f;
+    line-height: 1.1; letter-spacing: -1px; overflow-wrap: anywhere;
+}
+/* No modo ditado a frase some, mas guarda o espaço (a tela não pula). */
+.dictation-phrase.is-hidden { visibility: hidden; }
+.dictation-hint { margin: 0; color: #52514e; font-size: 1rem; }
+.dictation-answer {
+    width: 100%; box-sizing: border-box; resize: vertical; min-height: 96px;
+    padding: 14px 18px; border: 2px solid #d5d9de; border-radius: 16px; background: #fff;
+    font-family: 'Outfit', sans-serif; font-size: clamp(1.4rem, 3vw, 2.2rem); color: #1f1f1f;
+}
+.dictation-answer:focus { outline: none; border-color: #0078ff; box-shadow: 0 0 0 3px rgba(0, 120, 255, 0.15); }
+.dictation-answer.is-locked { background: #f4f6f8; color: #333; }
+.dictation-btn-check { background: #0078ff; color: #fff; }
+.dictation-feedback { display: flex; flex-direction: column; gap: 6px; }
+.dictation-feedback-title { font-size: 1.2rem; }
+.dictation-feedback-title.is-ok { color: #15803d; }
+.dictation-feedback-title.is-partial { color: #b45309; }
+.dictation-feedback-words { margin: 0; font-size: clamp(1.2rem, 2.6vw, 1.8rem); font-weight: 700; line-height: 1.6; }
+.dictation-word { padding: 0 4px; border-radius: 6px; }
+.dictation-word.is-ok { background: #dcfce7; color: #166534; }
+.dictation-word.is-wrong { background: #fee2e2; color: #b91c1c; }
+.dictation-word.is-missing { background: #fee2e2; color: #b91c1c; text-decoration: underline wavy; }
+.dictation-summary { align-items: center; text-align: center; }
+.dictation-summary h2 { margin: 0; font-size: 2rem; color: #1f1f1f; }
+.dictation-summary p { margin: 0; font-size: 1.3rem; color: #333; }
+.dictation-summary-icon { font-size: 3rem; color: #d97706; }
+@media (max-width: 768px) {
+    .dictation-body { justify-content: flex-start; padding: 10px 16px 16px; }
+    .dictation-phrase-row { gap: 12px; }
 }
 
 /* Aba "Voz do app" (admin): lista compacta em duas colunas (Femininas / Masculinas) */
