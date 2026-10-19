@@ -19257,6 +19257,48 @@ window.addEventListener('message', (event) => {
     document.querySelector('.app-layout')?.classList.toggle('reader-immersive', !!event.data.value);
 });
 
+// Android: ao abrir o teclado (ou num scrollIntoView) o navegador rola a página
+// e o .app-layout, mesmo com overflow: hidden, e às vezes não volta ao fechar —
+// a barra de baixo (sidebar no celular) ficava fora da tela. Com nenhum campo em
+// foco, a página não tem por que estar rolada: volta pro lugar.
+(function keepAppLayoutInPlace() {
+    const isEditing = () => {
+        const el = document.activeElement;
+        return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+    };
+    // No Chrome do Android o 100dvh às vezes sai, na entrada, como se a barra de
+    // endereço estivesse escondida — a tela fica mais alta que o espaço visível
+    // e a barra de baixo vai pra fora. innerHeight é a altura real da janela.
+    const syncAppHeight = () => {
+        document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+    };
+    syncAppHeight();
+    window.addEventListener('resize', syncAppHeight);
+    window.addEventListener('orientationchange', () => setTimeout(syncAppHeight, 300));
+    const reset = () => {
+        syncAppHeight();
+        if (isEditing()) return;
+        const layout = document.querySelector('.app-layout');
+        if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+        if (document.body.scrollTop) document.body.scrollTop = 0;
+        if (layout && layout.scrollTop) layout.scrollTop = 0;
+    };
+    // Ao entrar no app o Chrome do Android restaura a rolagem da última visita
+    // (recarregar, voltar, reabrir a aba) e o layout ainda se ajusta às barras
+    // do sistema depois do primeiro desenho — confere de novo nesse intervalo.
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+    const resetOnEnter = () => [0, 300, 1000].forEach(ms => setTimeout(reset, ms));
+    window.addEventListener('load', resetOnEnter);
+    window.addEventListener('pageshow', resetOnEnter);
+    // Espera o teclado terminar de fechar antes de conferir.
+    document.addEventListener('focusout', () => setTimeout(reset, 300));
+    window.addEventListener('scroll', reset, { passive: true });
+    window.visualViewport?.addEventListener('resize', reset);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reset();
+    });
+})();
+
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initApp);
 } else {

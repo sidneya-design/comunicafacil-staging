@@ -18,9 +18,16 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* A tela inteira nunca rola: só os painéis internos. No Android o navegador
+   rola a página para mostrar o campo quando o teclado abre (ou num
+   scrollIntoView) e às vezes não desfaz ao fechar — a barra de baixo ficava
+   escondida fora da tela. */
+html { height: 100%; overflow: hidden; overscroll-behavior: none; }
+
 body {
     font-family: 'Outfit', sans-serif; background-color: var(--bg-color);
-    color: var(--text-main); height: 100vh; height: 100dvh; overflow: hidden;
+    color: var(--text-main); height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); overflow: hidden;
+    overscroll-behavior: none;
     user-select: none;
 }
 
@@ -47,7 +54,7 @@ body {
     outline-offset: 2px;
 }
 
-.app-layout { display: flex; height: 100vh; height: 100dvh; width: 100vw; }
+.app-layout { display: flex; height: 100vh; height: 100dvh; height: var(--app-height, 100dvh); width: 100vw; }
 
 /* Modo imersivo: leitor de livros pede (via postMessage) para esconder o chrome do app
    e ocupar a tela toda — necessário no iOS Safari, que não suporta Fullscreen API para
