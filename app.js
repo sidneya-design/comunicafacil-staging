@@ -474,8 +474,17 @@ function wireWordEditorToolbar(container) {
             savedRange = sel.getRangeAt(0).cloneRange();
         }
     };
-    field.addEventListener('keyup', saveSelection);
-    field.addEventListener('mouseup', saveSelection);
+    // O quadrado de cor mostra a cor do texto onde está o cursor — senão
+    // ficava sempre no vermelho padrão e parecia que a cor salva era outra.
+    const syncColorInput = () => {
+        const sel = window.getSelection();
+        if (!colorInput || !sel.rangeCount || !field.contains(sel.anchorNode)) return;
+        const node = sel.anchorNode.nodeType === Node.ELEMENT_NODE ? sel.anchorNode : sel.anchorNode.parentElement;
+        const rgb = getComputedStyle(node).color.match(/\d+/g);
+        if (rgb) colorInput.value = '#' + rgb.slice(0, 3).map(n => Number(n).toString(16).padStart(2, '0')).join('');
+    };
+    field.addEventListener('keyup', () => { saveSelection(); syncColorInput(); });
+    field.addEventListener('mouseup', () => { saveSelection(); syncColorInput(); });
     colorInput?.addEventListener('mousedown', saveSelection);
 
     const restoreSelection = () => {
@@ -492,10 +501,14 @@ function wireWordEditorToolbar(container) {
         document.execCommand('bold');
     });
 
+    // 'input' dispara a cada cor por onde o seletor passa: guarda de novo a
+    // seleção depois de pintar, senão a próxima cor ia pra um trecho velho
+    // (o DOM mudou) e a cor final não era a escolhida.
     colorInput?.addEventListener('input', () => {
         field.focus();
         restoreSelection();
         document.execCommand('foreColor', false, colorInput.value);
+        saveSelection();
     });
 
     clearBtn?.addEventListener('mousedown', (e) => e.preventDefault());
@@ -514,22 +527,36 @@ let currentTypingWord = "";
 let db;
 const messageDisplay = document.getElementById('message-display');
 
-// CACHE DE IMAGENS ARASAAC
-const arasaacCache = {};
+// CACHE DE IMAGENS ARASAAC — guardado também no navegador: sem isso, cada
+// abertura do app refazia a busca de todos os cards dos Essenciais (~0,7s
+// cada) antes de o pictograma aparecer. Só guarda o endereço da imagem (a
+// própria imagem fica no cache HTTP do navegador). Busca sem resultado não é
+// guardada, pra tentar de novo na próxima vez.
+const ARASAAC_CACHE_KEY = 'comunica_arasaac_v1';
+const arasaacCache = (() => {
+    try { return JSON.parse(localStorage.getItem(ARASAAC_CACHE_KEY) || '{}') || {}; } catch (e) { return {}; }
+})();
+const arasaacPending = {}; // mesma palavra em vários cards ao mesmo tempo: uma busca só
 async function fetchArasaacImage(word) {
     const cleanWord = word.split(' ')[0].toLowerCase().trim();
     if (arasaacCache[cleanWord]) return arasaacCache[cleanWord];
-    try {
-        const response = await fetch(`https://api.arasaac.org/api/pictograms/pt/search/${encodeURIComponent(cleanWord)}`);
-        const data = await response.json();
-        if (data && data.length > 0) {
-            const id = data[0]._id;
-            const imageUrl = `https://static.arasaac.org/pictograms/${id}/${id}_500.png`;
-            arasaacCache[cleanWord] = imageUrl;
-            return imageUrl;
-        }
-    } catch (e) { }
-    return null;
+    if (!arasaacPending[cleanWord]) {
+        arasaacPending[cleanWord] = (async () => {
+            try {
+                const response = await fetch(`https://api.arasaac.org/api/pictograms/pt/search/${encodeURIComponent(cleanWord)}`);
+                const data = await response.json();
+                if (data && data.length > 0) {
+                    const id = data[0]._id;
+                    const imageUrl = `https://static.arasaac.org/pictograms/${id}/${id}_500.png`;
+                    arasaacCache[cleanWord] = imageUrl;
+                    try { localStorage.setItem(ARASAAC_CACHE_KEY, JSON.stringify(arasaacCache)); } catch (e) { /* cheio: fica só na memória */ }
+                    return imageUrl;
+                }
+            } catch (e) { }
+            return null;
+        })().finally(() => { delete arasaacPending[cleanWord]; });
+    }
+    return arasaacPending[cleanWord];
 }
 
 // ====================================================
@@ -2624,21 +2651,41 @@ function initIndexedDB() {
     };
     request.onsuccess = (event) => {
         db = event.target.result;
+        resolveLocalDbOpened();
         migrateLocalMediaAndExercises().then(async () => {
-            loadMediaCards();
             await seedLocalPracticeExercises();
-            loadExerciseCards();
+            resolveLocalExercisesReady();
         });
         initCoreCardsDB();
-        // Antes chamava initVirtuesDB()/initTopicsDB(), que liam direto do
-        // IndexedDB local (cache compartilhado por navegador, não por login)
-        // sem nunca passar pelo Supabase/RLS — sessão de outro usuário no
-        // mesmo navegador vazava direto. load*AndRender já cobre o mesmo
-        // bootstrap (semeia só se vazio globalmente E for admin/editor) e
-        // sempre confere o Supabase primeiro.
+        // Sem Supabase não tem sessão pra esperar: carrega daqui mesmo. Com
+        // Supabase, quem carrega é o fluxo da sessão (loadAppData), uma vez só.
+        if (!supabaseClient) loadAppData();
+    };
+}
+
+// Fomes e Forças, Tópicos, Mídias e Exercícios: carregados uma vez só, quando
+// a sessão resolve e o papel (isAdmin/isDoctor/currentPatientId) já é
+// conhecido. Antes rodavam aqui no boot e de novo depois da sessão — o dobro
+// de consultas na abertura, e a primeira ainda sem o papel certo. Todos leem
+// o IndexedDB, então esperam ele abrir; Mídias e Exercícios esperam também a
+// migração/semeadura local.
+let resolveLocalDbOpened;
+const localDbOpened = new Promise(resolve => { resolveLocalDbOpened = resolve; });
+let resolveLocalExercisesReady;
+const localExercisesReady = new Promise(resolve => { resolveLocalExercisesReady = resolve; });
+let appDataRequested = false;
+
+function loadAppData() {
+    if (appDataRequested) return;
+    appDataRequested = true;
+    localDbOpened.then(() => {
         loadVirtuesAndRender();
         loadTopicsAndRender();
-    };
+    });
+    localExercisesReady.then(() => {
+        loadMediaCards();
+        loadExerciseCards();
+    });
 }
 
 async function migrateLocalMediaAndExercises() {
@@ -14942,6 +14989,7 @@ if (supabaseClient) {
                 showEditBars();
                 applyModuleVisibility();
                 renderGamesList();
+                loadAppData();
                 const adminNavBtn = document.getElementById('btn-nav-admin');
                 if (adminNavBtn) adminNavBtn.style.display = 'flex';
                 restoreLastActiveView();
@@ -15012,17 +15060,11 @@ if (supabaseClient) {
                 // Re-render grids to show edit buttons se editor/admin
                 loadCoreAndRender();
             }
-            // Recarrega tudo direto do Supabase agora que o papel (isAdmin/
-            // isDoctor/currentPatientId) é conhecido. A primeira chamada (lá no
-            // boot do app, antes da sessão terminar de resolver) pode ter
-            // rodado sem sessão de verdade — pra paciente isso importa tanto
+            // Carrega tudo do Supabase agora que o papel (isAdmin/isDoctor/
+            // currentPatientId) é conhecido — pra paciente isso importa tanto
             // quanto pra médico (RLS de patient_topic_flags/patient_exercise_
-            // flags/etc. depende de currentPatientId estar setado), então não
-            // é mais restrito a isAdmin||isDoctor.
-            if (typeof loadVirtuesAndRender === 'function') loadVirtuesAndRender();
-            if (typeof loadTopicsAndRender === 'function') loadTopicsAndRender();
-            loadMediaCards();
-            loadExerciseCards();
+            // flags/etc. depende de currentPatientId estar setado).
+            loadAppData();
             // Pré-carrega doctorPatientsCache pro botão de avisar já ter o
             // nome do paciente pronto, mesmo sem o médico ter aberto "Meus
             // Pacientes" ainda nesta sessão (só popula o cache, não muda
@@ -15040,9 +15082,14 @@ if (supabaseClient) {
             restoreLastActiveView();
         } catch (e) {
             console.error("Erro ao checar permissões:", e);
+            // Sem isso as abas ficariam vazias (antes o boot já tinha carregado).
+            loadAppData();
         }
 
         showEditBars();
+    }).catch(e => {
+        console.error('Erro ao ler a sessão:', e);
+        loadAppData();
     });
 
     // A checagem acima roda uma única vez, no carregamento — sem isto, se a sessão cair
@@ -17715,10 +17762,34 @@ const MONTE_FRASE_CHART = {
     formatValue: formatEvolutionAverage
 };
 
+// chart.js só é usado nos gráficos da Evolução: carregado na primeira vez que
+// um gráfico abre, em vez de em toda abertura do app.
+const CHART_JS_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js';
+let chartJsLoading = null;
+function loadChartJs() {
+    if (typeof Chart !== 'undefined') return Promise.resolve();
+    if (!chartJsLoading) {
+        chartJsLoading = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = CHART_JS_URL;
+            script.onload = resolve;
+            script.onerror = () => { chartJsLoading = null; reject(new Error('chart.js não carregou')); };
+            document.head.appendChild(script);
+        });
+    }
+    return chartJsLoading;
+}
+
 function renderEvolutionChart(canvas, sessions, config = MONTE_FRASE_CHART) {
     if (patientEvolutionChart) patientEvolutionChart.destroy();
     patientEvolutionChart = null;
-    if (typeof Chart === 'undefined') return;
+    if (typeof Chart === 'undefined') {
+        // Desenha quando carregar, se o gráfico ainda estiver na tela.
+        loadChartJs()
+            .then(() => { if (canvas.isConnected) renderEvolutionChart(canvas, sessions, config); })
+            .catch(e => console.warn('Evolução: sem gráfico,', e.message));
+        return;
+    }
     const labels = sessions.map(session => new Date(session.startedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }));
     const series = (label, color, data) => ({
         label, data, borderColor: color, backgroundColor: color,
