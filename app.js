@@ -3953,6 +3953,7 @@ async function loadExerciseCards() {
                         forkedFrom: ex.forked_from || null,
                         gameKind: ex.game_kind || null,
                         autoPictograms: ex.auto_pictograms !== false,
+                        shuffleItems: ex.shuffle_items === true,
                         syllablesSize: ex.syllables_size || null,
                         syllablesColor: ex.syllables_color || null,
                         syllablesFont: ex.syllables_font || null,
@@ -6639,6 +6640,7 @@ function setupModals() {
         document.getElementById('new-monte-frase-hint').style.display = deck ? 'none' : '';
         newMonteFraseName.value = deck ? name : '';
         setCardColorPickerValue('monte-frase-color-picker', 'monte-frase-color', 'monte-frase-color-custom', (deck && color) || 'blue');
+        document.getElementById('monte-frase-shuffle').checked = deck?.shuffleItems === true;
         newMonteFraseError.style.display = 'none';
         newMonteFraseModal.style.display = 'flex';
         setTimeout(() => newMonteFraseName.focus(), 50);
@@ -6658,20 +6660,25 @@ function setupModals() {
         const deckTitle = newMonteFraseName.value.trim();
         if (!deckTitle) return;
         const title = `${deckTitle}|${document.getElementById('monte-frase-color').value || 'blue'}`;
+        const shuffleItems = document.getElementById('monte-frase-shuffle').checked;
         const submitBtn = document.getElementById('btn-submit-new-monte-frase');
         submitBtn.disabled = true;
         try {
             if (editingMonteFraseDeck) {
-                const { error } = await supabaseClient.from('exercises').update({ title }).eq('id', editingMonteFraseDeck.id);
+                const { error } = await supabaseClient.from('exercises').update({ title, shuffle_items: shuffleItems }).eq('id', editingMonteFraseDeck.id);
                 if (error) throw error;
                 logAdminAction('update', 'exercise', deckTitle);
+                const orderChanged = (editingMonteFraseDeck.shuffleItems === true) !== shuffleItems;
                 editingMonteFraseDeck.title = title;
+                editingMonteFraseDeck.shuffleItems = shuffleItems;
                 document.getElementById('monte-frase-deck-title').textContent = deckTitle;
+                // A ordem é decidida no iframe ao carregar: recarrega pra já valer.
+                if (orderChanged) document.getElementById('monte-frase-frame')?.contentWindow?.location.reload();
                 closeNewMonteFrase();
                 loadExerciseCards();
                 return;
             }
-            const payload = { title, visible: true, game_kind: 'monte-frase' };
+            const payload = { title, visible: true, game_kind: 'monte-frase', shuffle_items: shuffleItems };
             if (isDoctor) { payload.doctor_user_id = currentUserId; payload.company_id = currentUserCompanyId; }
             const { data: created, error } = await supabaseClient.from('exercises').insert([payload]).select().single();
             if (error) throw error;
@@ -6679,7 +6686,7 @@ function setupModals() {
             closeNewMonteFrase();
             await loadExerciseCards();
             openMonteFraseDeck(lastMergedExercises.find(ex => ex.id === created.id)
-                || { id: created.id, title: created.title, doctorUserId: created.doctor_user_id, companyId: created.company_id }, { manage: true });
+                || { id: created.id, title: created.title, doctorUserId: created.doctor_user_id, companyId: created.company_id, shuffleItems: created.shuffle_items === true }, { manage: true });
         } catch (err) {
             newMonteFraseError.textContent = (editingMonteFraseDeck ? 'Não consegui salvar: ' : 'Não consegui criar o conjunto: ') + err.message;
             newMonteFraseError.style.display = 'block';
@@ -7941,8 +7948,8 @@ function openGame(gameId) {
         // acesso e o tempo de uso são contados aqui fora, pelo
         // startUsageActivity logo abaixo, como em qualquer outro exercício.
         // O iframe recarrega a cada abertura, já com o conjunto escolhido no
-        // card (openMonteFraseDeck): começa do zero, com as frases numa ordem
-        // nova.
+        // card (openMonteFraseDeck): começa do zero, na ordem do cadastro (ou
+        // numa ordem sorteada, se o conjunto tiver o embaralhamento ligado).
         const frame = document.getElementById('monte-frase-frame');
         const deck = activeMonteFraseDeck;
         document.getElementById('game-monte-frase-container').style.display = 'flex';
