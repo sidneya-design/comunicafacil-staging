@@ -474,8 +474,17 @@ function wireWordEditorToolbar(container) {
             savedRange = sel.getRangeAt(0).cloneRange();
         }
     };
-    field.addEventListener('keyup', saveSelection);
-    field.addEventListener('mouseup', saveSelection);
+    // O quadrado de cor mostra a cor do texto onde está o cursor — senão
+    // ficava sempre no vermelho padrão e parecia que a cor salva era outra.
+    const syncColorInput = () => {
+        const sel = window.getSelection();
+        if (!colorInput || !sel.rangeCount || !field.contains(sel.anchorNode)) return;
+        const node = sel.anchorNode.nodeType === Node.ELEMENT_NODE ? sel.anchorNode : sel.anchorNode.parentElement;
+        const rgb = getComputedStyle(node).color.match(/\d+/g);
+        if (rgb) colorInput.value = '#' + rgb.slice(0, 3).map(n => Number(n).toString(16).padStart(2, '0')).join('');
+    };
+    field.addEventListener('keyup', () => { saveSelection(); syncColorInput(); });
+    field.addEventListener('mouseup', () => { saveSelection(); syncColorInput(); });
     colorInput?.addEventListener('mousedown', saveSelection);
 
     const restoreSelection = () => {
@@ -492,10 +501,14 @@ function wireWordEditorToolbar(container) {
         document.execCommand('bold');
     });
 
+    // 'input' dispara a cada cor por onde o seletor passa: guarda de novo a
+    // seleção depois de pintar, senão a próxima cor ia pra um trecho velho
+    // (o DOM mudou) e a cor final não era a escolhida.
     colorInput?.addEventListener('input', () => {
         field.focus();
         restoreSelection();
         document.execCommand('foreColor', false, colorInput.value);
+        saveSelection();
     });
 
     clearBtn?.addEventListener('mousedown', (e) => e.preventDefault());
