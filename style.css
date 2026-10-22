@@ -436,6 +436,8 @@ body {
 .exercise-type-option.mirror i { color: #e53935; }
 .exercise-type-option.dictation { border-color: #fcd34d; }
 .exercise-type-option.dictation i { color: #d97706; }
+.exercise-type-option.choice { border-color: #86efac; }
+.exercise-type-option.choice i { color: #16a34a; }
 
 .reading-text-phrase-block { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
 .reading-text-phrase-input { flex: 1; height: 40px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; padding: 0 12px; font-size: 15px; font-family: inherit; }
@@ -5017,6 +5019,31 @@ button, .action-btn { touch-action: manipulation; }
     .dictation-body { justify-content: flex-start; padding: 10px 16px 16px; }
     .dictation-phrase-row { gap: 12px; }
 }
+
+/* Escolha a Resposta: usa o layout do Ditado; as alternativas são botões grandes. */
+.choice-question { letter-spacing: -0.5px; }
+.choice-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.choice-option {
+    min-height: 84px; padding: 14px 18px; border: 3px solid #d5d9de; border-radius: 16px; background: #fff;
+    font-family: inherit; font-size: clamp(1.3rem, 2.8vw, 2rem); font-weight: 700; color: #1f1f1f;
+    cursor: pointer; transition: border-color 0.15s, background-color 0.15s; overflow-wrap: anywhere;
+}
+.choice-option:hover:not(:disabled) { border-color: #0078ff; }
+.choice-option:disabled { cursor: default; color: #1f1f1f; }
+.choice-option.is-selected { border-color: #0078ff; background: #e8f2ff; }
+.choice-option.is-ok { border-color: #16a34a; background: #dcfce7; color: #166534; }
+.choice-option.is-wrong { border-color: #dc2626; background: #fee2e2; color: #b91c1c; }
+@media (max-width: 768px) {
+    .choice-options { grid-template-columns: 1fr; gap: 10px; }
+    .choice-option { min-height: 64px; }
+}
+
+/* Cadastro do Escolha a Resposta: uma linha por alternativa, com "Certa". */
+.choice-option-list { display: flex; flex-direction: column; gap: 8px; }
+.choice-option-row { display: flex; align-items: center; gap: 10px; }
+.choice-option-row .choice-option-correct { display: flex; align-items: center; gap: 6px; margin: 0; color: #15803d; cursor: pointer; flex-shrink: 0; }
+.choice-option-row .choice-option-check { width: 20px; height: 20px; padding: 0; accent-color: #16a34a; cursor: pointer; }
+.choice-option-row .choice-option-text { flex: 1; min-width: 0; height: 40px; box-sizing: border-box; padding: 0 10px; border: 1px solid #ddd; border-radius: 8px; }
 
 /* Aba "Voz do app" (admin): lista compacta em duas colunas (Femininas / Masculinas) */
 .tts-voice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
