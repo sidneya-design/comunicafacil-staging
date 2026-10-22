@@ -515,6 +515,36 @@
                             </div>
                         </div>
 
+                        <!-- Escolha a Resposta: pergunta + alternativas; a pessoa toca na certa. Cada resposta vai pra activity_results (aba Evolução). -->
+                        <div id="game-choice-container" class="dictation-game" style="display:none;">
+                            <div class="memory-header dictation-header">
+                                <strong class="dictation-deck-title" id="choice-deck-title">Escolha a Resposta</strong>
+                                <span class="mirror-progress" id="choice-progress">0 / 0</span>
+                            </div>
+                            <div class="dictation-body" id="choice-play">
+                                <div class="dictation-phrase-row">
+                                    <h2 class="dictation-phrase choice-question" id="choice-question"></h2>
+                                    <button type="button" class="presentation-audio-btn" id="btn-choice-listen" aria-label="Ouvir a pergunta"><i class="fas fa-volume-up" aria-hidden="true"></i></button>
+                                </div>
+                                <p class="dictation-hint" id="choice-hint"></p>
+                                <div class="choice-options" id="choice-options" role="group" aria-labelledby="choice-question"></div>
+                                <div class="dictation-feedback" id="choice-feedback" style="display:none;"></div>
+                                <div class="mirror-controls">
+                                    <button type="button" class="mirror-btn dictation-btn-check" id="btn-choice-check" style="display:none;" disabled><i class="fas fa-check" aria-hidden="true"></i> Conferir</button>
+                                    <button type="button" class="mirror-btn mirror-btn-soft" id="btn-choice-retry" style="display:none;"><i class="fas fa-rotate-left" aria-hidden="true"></i> Tentar de novo</button>
+                                    <button type="button" class="mirror-btn dictation-btn-check" id="btn-choice-next" style="display:none;"><span>Próxima pergunta</span> <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+                                </div>
+                            </div>
+                            <div class="dictation-body dictation-summary" id="choice-summary" style="display:none;">
+                                <i class="fas fa-flag-checkered dictation-summary-icon" aria-hidden="true"></i>
+                                <h2>Terminou!</h2>
+                                <p id="choice-summary-text"></p>
+                                <div class="mirror-controls">
+                                    <button type="button" class="mirror-btn dictation-btn-check" id="btn-choice-restart"><i class="fas fa-rotate-right" aria-hidden="true"></i> Fazer de novo</button>
+                                </div>
+                            </div>
+                        </div>
+
                 </main>
 
                 <!-- Tela: Jogos -->
@@ -1144,13 +1174,14 @@
                             <div class="admin-analytics-hero">
                                 <div>
                                     <div class="admin-panel-kicker"><i class="fas fa-chart-line" aria-hidden="true"></i> Evolução nos exercícios</div>
-                                    <h3>Monte a Frase e Ditado de cada paciente, sessão a sessão.</h3>
+                                    <h3>Monte a Frase, Ditado e Escolha a Resposta de cada paciente, sessão a sessão.</h3>
                                     <p>Escolha um paciente para ver como ele vem se saindo.</p>
                                 </div>
                                 <div class="admin-analytics-actions">
                                     <select id="admin-evolution-activity" class="admin-analytics-select" aria-label="Escolher atividade">
                                         <option value="monte-frase">Monte a Frase</option>
                                         <option value="dictation">Ditado</option>
+                                        <option value="choice">Escolha a Resposta</option>
                                     </select>
                                     <select id="admin-evolution-patient" class="admin-analytics-select" aria-label="Escolher paciente">
                                         <option value="">Escolha um paciente</option>
@@ -1430,13 +1461,14 @@
                             <div class="admin-analytics-hero">
                                 <div>
                                     <div class="admin-panel-kicker"><i class="fas fa-chart-line" aria-hidden="true"></i> Evolução nos exercícios</div>
-                                    <h3>Monte a Frase e Ditado de cada paciente, sessão a sessão.</h3>
+                                    <h3>Monte a Frase, Ditado e Escolha a Resposta de cada paciente, sessão a sessão.</h3>
                                     <p>Escolha um dos seus pacientes para ver como ele vem se saindo.</p>
                                 </div>
                                 <div class="admin-analytics-actions">
                                     <select id="doctor-evolution-activity" class="admin-analytics-select" aria-label="Escolher atividade">
                                         <option value="monte-frase">Monte a Frase</option>
                                         <option value="dictation">Ditado</option>
+                                        <option value="choice">Escolha a Resposta</option>
                                     </select>
                                     <select id="doctor-evolution-patient" class="admin-analytics-select" aria-label="Escolher paciente">
                                         <option value="">Escolha um paciente</option>
@@ -1791,6 +1823,11 @@
                     <strong>Ditado</strong>
                     <span>Atividade de avaliação: a pessoa vê e ouve a frase e escreve. As respostas ficam na Evolução.</span>
                 </button>
+                <button type="button" class="exercise-type-option choice" id="btn-create-choice-exercise">
+                    <i class="fas fa-list-check" aria-hidden="true"></i>
+                    <strong>Escolha a Resposta</strong>
+                    <span>Uma pergunta e alternativas; a pessoa toca na certa. As respostas ficam na Evolução.</span>
+                </button>
                 <button type="button" class="exercise-type-option audio-real" id="btn-create-audio-exercise">
                     <i class="fas fa-microphone" aria-hidden="true"></i>
                     <strong>Exercício com Áudio Real</strong>
@@ -2133,6 +2170,72 @@
 
                 <div class="modal-footer">
                     <button type="button" class="btn-secondary" id="btn-cancel-dictation-exercise">Cancelar</button>
+                    <button type="submit" class="btn-primary"
+                        style="background: linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%);">Salvar Exercício</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Escolha a Resposta: cada pergunta tem de 2 a 4 alternativas, marcando a(s) certa(s). -->
+    <div class="modal-overlay" id="choice-exercise-modal" role="dialog" aria-modal="true" aria-labelledby="choice-exercise-modal-title">
+        <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2 id="choice-exercise-modal-title">Novo Exercício (Escolha a Resposta)</h2>
+                <button class="close-modal-btn" id="btn-close-choice-exercise" aria-label="Fechar"><i class="fas fa-times" aria-hidden="true"></i></button>
+            </div>
+            <form id="choice-exercise-form">
+                <div class="form-group">
+                    <label for="choice-exercise-title">Nome do Exercício (Ex: Onde encontramos?)</label>
+                    <input type="text" id="choice-exercise-title" required placeholder="Ex: Quantos">
+                </div>
+                <div class="form-group">
+                    <label for="choice-exercise-color-custom">Cor do Card</label>
+                    <div class="card-color-picker" id="choice-exercise-color-picker">
+                        <span class="card-color-custom-wrap"><input type="color" id="choice-exercise-color-custom" class="card-color-custom" title="Outra cor" value="#FFFFFF"></span><button type="button" class="card-color-save-btn" id="choice-exercise-color-save" title="Salvar esta cor para usar em outros cards" aria-label="Salvar cor customizada"><i class="fas fa-bookmark" aria-hidden="true"></i></button>
+                    </div>
+                    <input type="hidden" id="choice-exercise-color" value="pink">
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                        <label for="choice-text-size">Tamanho da Pergunta (px)</label>
+                        <input type="number" id="choice-text-size" value="44" min="20" max="200"
+                            style="width: 100%; height: 40px; box-sizing: border-box; padding: 0 10px; border: 1px solid #ddd; border-radius: 8px;">
+                    </div>
+                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                        <label for="choice-text-color">Cor do Texto</label>
+                        <input type="color" id="choice-text-color" value="#1f1f1f"
+                            style="width: 100%; height: 40px; cursor: pointer; border: 1px solid #ddd; border-radius: 8px;">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="choice-font">Fonte</label>
+                    <select id="choice-font" style="width: 100%; height: 40px; border: 1px solid #ddd; border-radius: 8px; padding: 0 10px; background: white; cursor: pointer;">
+                        <option value="'Outfit', sans-serif">Padrão (Outfit)</option>
+                        <option value="'Comic Sans MS', 'Comic Sans', cursive">Arredondada (Comic Sans)</option>
+                        <option value="Georgia, 'Times New Roman', serif">Serifada (Georgia)</option>
+                        <option value="'Courier New', monospace">Monoespaçada (Courier)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="choice-exercise-target-company-group" style="display:none;">
+                    <label for="choice-exercise-target-company">Enviar para empresa (opcional)</label>
+                    <select id="choice-exercise-target-company" style="width: 100%; height: 40px; border: 1px solid #ddd; border-radius: 8px; padding: 0 10px; background: white; cursor: pointer;">
+                        <option value="">Nenhuma (global, todo mundo vê)</option>
+                    </select>
+                </div>
+
+                <p class="media-hint">Em cada pergunta, marque a alternativa certa. Se marcar duas, a pessoa precisa escolher as duas.</p>
+                <div id="choice-items-container"></div>
+
+                <button type="button" class="btn-secondary" id="btn-add-choice-item"
+                    style="margin-bottom: 20px; width: 100%;">
+                    <i class="fas fa-plus" aria-hidden="true"></i> Adicionar outra pergunta a este exercício
+                </button>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" id="btn-cancel-choice-exercise">Cancelar</button>
                     <button type="submit" class="btn-primary"
                         style="background: linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%);">Salvar Exercício</button>
                 </div>
@@ -2693,6 +2796,12 @@
                     </div>
                     <input type="hidden" id="monte-frase-color" value="blue">
                 </div>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: bold; cursor: pointer; color: #333;">
+                        <input type="checkbox" id="monte-frase-shuffle" style="width: 18px; height: 18px; cursor: pointer;"> Embaralhar a ordem das frases
+                    </label>
+                    <span style="display:block;font-size:12px;color:#999;margin-top:4px;">Sem marcar, as frases aparecem sempre na ordem do cadastro. As palavras de cada frase são embaralhadas de qualquer jeito.</span>
+                </div>
                 <p class="media-hint" id="new-monte-frase-hint">Depois de criar, você já cadastra as frases deste conjunto.</p>
                 <div id="new-monte-frase-error" class="admin-feedback error" style="display:none;"></div>
                 <div class="modal-footer">
@@ -2853,7 +2962,7 @@
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script defer src="app.js?v=133"></script>
+    <script defer src="app.js?v=135"></script>
 </body>
 
 

@@ -1932,6 +1932,7 @@ function initApp() {
     setupAudioModuleControls();
     setupMirrorControls();
     setupDictationControls();
+    setupChoiceControls();
     renderGamesList();
     if (isCompleteSentenceLocalDemo()) {
         setTimeout(() => {
@@ -2464,6 +2465,35 @@ async function speakWithAzure(text, rateKey) {
         if (myRequestId !== ttsRequestId) return;
         console.warn('TTS via backend indisponível, usando a voz do navegador:', e.message);
         _speakNative(text);
+    }
+}
+
+// Fala os trechos um depois do outro, com uma pausa entre eles. No Escolha a
+// Resposta, pergunta e alternativas num áudio só saíam emendadas (a voz só
+// pausa o que a pontuação manda, e pergunta sem ponto final colava direto).
+async function speakInParts(parts, pauseMs = 700) {
+    const texts = parts.filter(Boolean);
+    if (!texts.length) return;
+    const myRequestId = ++ttsRequestId;
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    try {
+        const audios = await Promise.all(texts.map(text => getTtsAudio(text, null, null)));
+        for (let index = 0; index < audios.length; index += 1) {
+            if (index) await new Promise(resolve => setTimeout(resolve, pauseMs));
+            if (myRequestId !== ttsRequestId) return;
+            const audio = new Audio('data:audio/mp3;base64,' + audios[index]);
+            currentAudio = audio;
+            // Parado no meio (saiu do exercício, outra fala começou): o resto não toca.
+            const finished = new Promise(resolve => { audio.onended = resolve; audio.onpause = resolve; });
+            await audio.play();
+            await finished;
+            if (!audio.ended) return;
+        }
+    } catch (e) {
+        if (myRequestId !== ttsRequestId) return;
+        console.warn('TTS via backend indisponível, usando a voz do navegador:', e.message);
+        _speakNative(texts.join('. '));
     }
 }
 
@@ -3908,7 +3938,7 @@ async function loadExerciseCards() {
                     const items = (itemData || []).filter(item => item.exercise_id === ex.id).map(item => ({
                         word: item.word, syllables: item.syllables, color: item.color, size: item.size, uppercase: item.uppercase,
                         bold: item.bold, videoLink: item.link, image_url: item.image_url,
-                        pairId: item.pair_id, role: item.role, audio_url: item.audio_url
+                        pairId: item.pair_id, role: item.role, audio_url: item.audio_url, choices: item.choices || null
                     }));
                     return {
                         id: ex.id,
@@ -3923,6 +3953,7 @@ async function loadExerciseCards() {
                         forkedFrom: ex.forked_from || null,
                         gameKind: ex.game_kind || null,
                         autoPictograms: ex.auto_pictograms !== false,
+                        shuffleItems: ex.shuffle_items === true,
                         syllablesSize: ex.syllables_size || null,
                         syllablesColor: ex.syllables_color || null,
                         syllablesFont: ex.syllables_font || null,
@@ -4009,6 +4040,7 @@ function renderExerciseCards(exercisesArray) {
         else if (ex.gameKind === 'syllables') openEditSyllablesExercise(ex);
         else if (ex.gameKind === 'mirror') openEditMirrorExercise(ex);
         else if (ex.gameKind === 'dictation') openEditDictationExercise(ex);
+        else if (ex.gameKind === 'choice') openChoiceExerciseModal(ex);
         else if (ex.gameKind === 'audio-real') openEditAudioExercise(ex);
         else if (ex.gameKind === 'reading-text') openEditReadingTextExercise(ex);
         else if (ex.gameKind === 'monte-frase') openMonteFraseDeck(ex, { manage: true });
@@ -4021,6 +4053,7 @@ function renderExerciseCards(exercisesArray) {
         else if (ex.gameKind === 'reading-text') openReadingTextPlayer(ex);
         else if (ex.gameKind === 'mirror') openMirrorExercise(ex);
         else if (ex.gameKind === 'dictation') openDictationExercise(ex);
+        else if (ex.gameKind === 'choice') openChoiceExercise(ex);
         else openPresentationPlaylist(ex);
     };
 
@@ -4101,6 +4134,9 @@ function renderExerciseCards(exercisesArray) {
         } else if (ex.gameKind === 'dictation') {
             // Ditado: a 1ª frase como capa entregaria a resposta — ícone de escrita.
             imgContainer.innerHTML = '<i class="fas fa-pen-to-square word-btn-icon" aria-hidden="true"></i>';
+        } else if (ex.gameKind === 'choice') {
+            // Escolha a Resposta: a 1ª pergunta não cabe legível no card — ícone de lista.
+            imgContainer.innerHTML = '<i class="fas fa-list-check word-btn-icon" aria-hidden="true"></i>';
         } else if (firstItem && firstItem.imageBlob instanceof Blob) {
             imgContainer.innerHTML = `<img src="${URL.createObjectURL(firstItem.imageBlob)}" class="word-btn-img" alt="" />`;
         } else if (firstItem && firstItem.image_url) {
@@ -4244,7 +4280,7 @@ function renderExerciseCards(exercisesArray) {
                 btn.appendChild(createNotifyUsersButton(displayTitle, 'Exercício', { id: ex.patientId, name: patientInfo?.name, email: patientInfo?.email }));
             }
         } else if (isDoctor && ex.doctorUserId && ex.doctorUserId !== currentUserId && !ex.patientId && ex.companyId && ex.companyId === currentUserCompanyId
-                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text' || ex.gameKind === 'monte-frase' || ex.gameKind === 'mirror' || ex.gameKind === 'dictation')) {
+                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text' || ex.gameKind === 'monte-frase' || ex.gameKind === 'mirror' || ex.gameKind === 'dictation' || ex.gameKind === 'choice')) {
             // Exercício do banco de um colega da mesma empresa (não do admin, não
             // meu): a RLS já libera escrita compartilhada por empresa faz tempo
             // (migration company_shared_doctor_bank), mas a tela nunca tinha
@@ -4259,7 +4295,7 @@ function renderExerciseCards(exercisesArray) {
             };
             btn.appendChild(editBtn);
         } else if (isDoctor && !ex.doctorUserId && ex.companyId && ex.companyId === currentUserCompanyId
-                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text' || ex.gameKind === 'mirror' || ex.gameKind === 'dictation')) {
+                   && (!ex.gameKind || ex.gameKind === 'syllables' || ex.gameKind === 'audio-real' || ex.gameKind === 'reading-text' || ex.gameKind === 'mirror' || ex.gameKind === 'dictation' || ex.gameKind === 'choice')) {
             // Exercício que o admin mandou direto pra empresa do médico: edita em
             // cima do original (a RLS libera essa escrita pra qualquer médico da
             // empresa) — sem fork, os colegas continuam vendo a mesma versão.
@@ -5752,6 +5788,162 @@ function openEditDictationExercise(ex) {
     openDictationExerciseModal(ex);
 }
 
+// Exercício Escolha a Resposta: mesmo molde do Ditado. Cada pergunta é um
+// item (word = pergunta) com as alternativas em exercise_items.choices:
+// [{ text, correct }], de 2 a CHOICE_MAX_OPTIONS, uma ou mais certas.
+const CHOICE_MAX_OPTIONS = 4;
+const CHOICE_DEFAULT_TEXT_SIZE = 44;
+let currentEditingChoiceExerciseId = null;
+let currentEditingChoiceExerciseFromSupabase = false;
+let choiceBlockCounter = 0;
+
+async function saveChoiceExerciseToDB(title, size, color, font, itemsArray, doctorUserId = null, companyId = null) {
+    const shouldTrySupabase = supabaseClient && (!currentEditingChoiceExerciseId || currentEditingChoiceExerciseFromSupabase);
+    if (shouldTrySupabase) {
+        try {
+            const deckFields = { title, syllables_size: size || null, syllables_color: color || null, syllables_font: font || null };
+            let targetExerciseId = currentEditingChoiceExerciseId;
+
+            if (targetExerciseId) {
+                const updateFields = isAdmin ? { ...deckFields, company_id: companyId } : deckFields;
+                // .select(): com RLS, update bloqueado não dá erro, só não altera nada.
+                const { data: updated, error: updateErr } = await supabaseClient.from('exercises').update(updateFields).eq('id', targetExerciseId).select('id');
+                if (updateErr) throw updateErr;
+                if (!updated || updated.length === 0) throw new Error('sem permissão para editar este exercício');
+                const { error: deleteErr } = await supabaseClient.from('exercise_items').delete().eq('exercise_id', targetExerciseId);
+                if (deleteErr) throw deleteErr;
+            } else {
+                const newExercisePayload = doctorUserId
+                    ? { ...deckFields, visible: true, game_kind: 'choice', doctor_user_id: doctorUserId, company_id: currentUserCompanyId }
+                    : { ...deckFields, visible: false, game_kind: 'choice', company_id: companyId };
+                const { data: exData, error: insertErr } = await supabaseClient.from('exercises').insert([newExercisePayload]).select().single();
+                if (insertErr) throw insertErr;
+                targetExerciseId = exData.id;
+            }
+
+            const dbItems = itemsArray.map(item => ({ exercise_id: targetExerciseId, word: item.word, choices: item.choices, syllables: '', link: '' }));
+            const { error: itemsErr } = await supabaseClient.from('exercise_items').insert(dbItems);
+            if (itemsErr) throw itemsErr;
+
+            logAdminAction(currentEditingChoiceExerciseId ? 'update' : 'create', 'exercise', title);
+            loadExerciseCards();
+            return;
+        } catch (e) {
+            console.warn('Erro ao salvar exercício Escolha a Resposta no Supabase, caindo para local:', e);
+            alert('Não foi possível salvar o exercício no servidor (ficou salvo só neste dispositivo). Detalhe: ' + (e?.message || e));
+        }
+    }
+
+    const localPayload = { title, items: itemsArray, visible: false, gameKind: 'choice', syllablesSize: size || null, syllablesColor: color || null, syllablesFont: font || null };
+    if (currentEditingChoiceExerciseId) {
+        db.transaction(['exercises'], 'readonly').objectStore('exercises').get(currentEditingChoiceExerciseId).onsuccess = (e) => {
+            const existing = e.target.result || {};
+            db.transaction(['exercises'], 'readwrite').objectStore('exercises')
+                .put({ ...existing, ...localPayload, id: currentEditingChoiceExerciseId })
+                .onsuccess = () => loadExerciseCards();
+        };
+    } else {
+        db.transaction(['exercises'], 'readwrite').objectStore('exercises')
+            .add(localPayload)
+            .onsuccess = () => loadExerciseCards();
+    }
+}
+
+function createChoiceItemBlockHtml(blockId, isEdit = false) {
+    const optionRows = Array.from({ length: CHOICE_MAX_OPTIONS }, (_, index) => `
+                <div class="choice-option-row">
+                    <label class="choice-option-correct" title="Alternativa certa">
+                        <input type="checkbox" class="choice-option-check" aria-label="Alternativa ${index + 1} é a certa">
+                        <span>Certa</span>
+                    </label>
+                    <input type="text" class="choice-option-text" placeholder="${index < 2 ? `Alternativa ${index + 1}` : `Alternativa ${index + 1} (opcional)`}" aria-label="Alternativa ${index + 1}">
+                </div>`).join('');
+    return `
+        <div class="exercise-item-block choice-item-block" data-block-id="${blockId}">
+            <div class="block-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h4 style="margin:0;" class="block-title">Pergunta</h4>
+                ${isEdit ? '<button type="button" class="btn-remove-block" style="background:#ff4d4f;color:white;border:none;padding:5px 10px;border-radius:8px;cursor:pointer;"><i class="fas fa-trash" aria-hidden="true"></i> Remover</button>' : ''}
+            </div>
+            <div class="form-group">
+                <label>Pergunta</label>
+                <div class="word-editor-toolbar">
+                    <button type="button" class="word-editor-btn word-editor-bold" title="Negrito na seleção"><i class="fas fa-bold" aria-hidden="true"></i></button>
+                    <input type="color" class="word-editor-color" title="Cor na seleção" value="#e63946">
+                    <button type="button" class="word-editor-btn word-editor-clear" title="Limpar formatação">Limpar</button>
+                </div>
+                <div class="choice-item-question word-editor-field" contenteditable="true" data-placeholder="Ex: Quando o sol nasce?" role="textbox" aria-label="Pergunta"></div>
+            </div>
+            <div class="form-group">
+                <label>Alternativas</label>
+                <div class="choice-option-list">${optionRows}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function addChoiceItemBlock(isEdit = false) {
+    const container = document.getElementById('choice-items-container');
+    const blockId = choiceBlockCounter++;
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = createChoiceItemBlockHtml(blockId, isEdit);
+    const blockEl = wrapper.firstElementChild;
+    const removeBtn = blockEl.querySelector('.btn-remove-block');
+    if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+            container.removeChild(blockEl);
+            updateChoiceBlockTitles();
+        });
+    }
+    wireAllWordEditors(blockEl);
+    container.appendChild(blockEl);
+    updateChoiceBlockTitles();
+    return blockEl;
+}
+
+function updateChoiceBlockTitles() {
+    document.querySelectorAll('#choice-items-container .choice-item-block').forEach((b, index) => {
+        b.querySelector('.block-title').textContent = `Pergunta ${index + 1}`;
+    });
+}
+
+function openChoiceExerciseModal(ex = null) {
+    currentEditingChoiceExerciseId = ex ? ex.id : null;
+    currentEditingChoiceExerciseFromSupabase = !!ex?.fromSupabase;
+    choiceBlockCounter = 0;
+
+    const modal = document.getElementById('choice-exercise-modal');
+    modal.style.display = 'flex';
+    modal.querySelector('h2').textContent = ex ? "Editar Exercício (Escolha a Resposta)" : "Novo Exercício (Escolha a Resposta)";
+    document.getElementById('choice-exercise-form').reset();
+
+    const parts = (ex?.title || '').split('|');
+    document.getElementById('choice-exercise-title').value = parts[0] || '';
+    setCardColorPickerValue('choice-exercise-color-picker', 'choice-exercise-color', 'choice-exercise-color-custom', parts[1] || 'pink');
+    document.getElementById('choice-text-size').value = ex?.syllablesSize || CHOICE_DEFAULT_TEXT_SIZE;
+    document.getElementById('choice-text-color').value = ex?.syllablesColor || '#1f1f1f';
+    document.getElementById('choice-font').value = ex?.syllablesFont || "'Outfit', sans-serif";
+
+    const companyGroup = document.getElementById('choice-exercise-target-company-group');
+    if (companyGroup) {
+        companyGroup.style.display = isAdmin ? '' : 'none';
+        if (isAdmin) populateExerciseCompanySelect('choice-exercise-target-company', ex?.companyId || null);
+    }
+
+    const container = document.getElementById('choice-items-container');
+    container.innerHTML = '';
+    if (!ex) { addChoiceItemBlock(); return; }
+    ex.items.forEach(item => {
+        const blockEl = addChoiceItemBlock(true);
+        blockEl.querySelector('.choice-item-question').innerHTML = sanitizeWordHtml(item.word || '');
+        const rows = blockEl.querySelectorAll('.choice-option-row');
+        (item.choices || []).slice(0, CHOICE_MAX_OPTIONS).forEach((choice, index) => {
+            rows[index].querySelector('.choice-option-text').value = choice.text || '';
+            rows[index].querySelector('.choice-option-check').checked = !!choice.correct;
+        });
+    });
+}
+
 function openEditSyllablesExercise(ex) {
     currentEditingSyllablesExerciseId = ex.id;
     currentEditingSyllablesExerciseFromSupabase = !!ex.fromSupabase;
@@ -6448,6 +6640,7 @@ function setupModals() {
         document.getElementById('new-monte-frase-hint').style.display = deck ? 'none' : '';
         newMonteFraseName.value = deck ? name : '';
         setCardColorPickerValue('monte-frase-color-picker', 'monte-frase-color', 'monte-frase-color-custom', (deck && color) || 'blue');
+        document.getElementById('monte-frase-shuffle').checked = deck?.shuffleItems === true;
         newMonteFraseError.style.display = 'none';
         newMonteFraseModal.style.display = 'flex';
         setTimeout(() => newMonteFraseName.focus(), 50);
@@ -6467,20 +6660,25 @@ function setupModals() {
         const deckTitle = newMonteFraseName.value.trim();
         if (!deckTitle) return;
         const title = `${deckTitle}|${document.getElementById('monte-frase-color').value || 'blue'}`;
+        const shuffleItems = document.getElementById('monte-frase-shuffle').checked;
         const submitBtn = document.getElementById('btn-submit-new-monte-frase');
         submitBtn.disabled = true;
         try {
             if (editingMonteFraseDeck) {
-                const { error } = await supabaseClient.from('exercises').update({ title }).eq('id', editingMonteFraseDeck.id);
+                const { error } = await supabaseClient.from('exercises').update({ title, shuffle_items: shuffleItems }).eq('id', editingMonteFraseDeck.id);
                 if (error) throw error;
                 logAdminAction('update', 'exercise', deckTitle);
+                const orderChanged = (editingMonteFraseDeck.shuffleItems === true) !== shuffleItems;
                 editingMonteFraseDeck.title = title;
+                editingMonteFraseDeck.shuffleItems = shuffleItems;
                 document.getElementById('monte-frase-deck-title').textContent = deckTitle;
+                // A ordem é decidida no iframe ao carregar: recarrega pra já valer.
+                if (orderChanged) document.getElementById('monte-frase-frame')?.contentWindow?.location.reload();
                 closeNewMonteFrase();
                 loadExerciseCards();
                 return;
             }
-            const payload = { title, visible: true, game_kind: 'monte-frase' };
+            const payload = { title, visible: true, game_kind: 'monte-frase', shuffle_items: shuffleItems };
             if (isDoctor) { payload.doctor_user_id = currentUserId; payload.company_id = currentUserCompanyId; }
             const { data: created, error } = await supabaseClient.from('exercises').insert([payload]).select().single();
             if (error) throw error;
@@ -6488,7 +6686,7 @@ function setupModals() {
             closeNewMonteFrase();
             await loadExerciseCards();
             openMonteFraseDeck(lastMergedExercises.find(ex => ex.id === created.id)
-                || { id: created.id, title: created.title, doctorUserId: created.doctor_user_id, companyId: created.company_id }, { manage: true });
+                || { id: created.id, title: created.title, doctorUserId: created.doctor_user_id, companyId: created.company_id, shuffleItems: created.shuffle_items === true }, { manage: true });
         } catch (err) {
             newMonteFraseError.textContent = (editingMonteFraseDeck ? 'Não consegui salvar: ' : 'Não consegui criar o conjunto: ') + err.message;
             newMonteFraseError.style.display = 'block';
@@ -6684,6 +6882,53 @@ function setupModals() {
         const targetCompanyId = isAdmin ? (document.getElementById('dictation-exercise-target-company')?.value || null) : null;
         saveDictationExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, modeVal, itemsArray, targetDoctorUserId, targetCompanyId);
         closeDictationExerciseUpload();
+    });
+
+    // Exercício Escolha a Resposta — mesmo fluxo do Ditado.
+    document.getElementById('btn-create-choice-exercise').addEventListener('click', () => {
+        closeExerciseType();
+        openChoiceExerciseModal();
+    });
+    const closeChoiceExerciseUpload = () => { document.getElementById('choice-exercise-modal').style.display = 'none'; document.getElementById('choice-exercise-form').reset(); };
+    document.getElementById('btn-close-choice-exercise').addEventListener('click', closeChoiceExerciseUpload);
+    document.getElementById('btn-cancel-choice-exercise').addEventListener('click', closeChoiceExerciseUpload);
+    document.getElementById('btn-add-choice-item').addEventListener('click', () => addChoiceItemBlock(true));
+
+    document.getElementById('choice-exercise-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!isAdmin && !isDoctor) {
+            alert('Apenas administradores ou médicos podem salvar exercícios.');
+            return;
+        }
+        const titleVal = document.getElementById('choice-exercise-title').value.trim();
+        const colorVal = document.getElementById('choice-exercise-color').value;
+        const finalTitle = `${titleVal}|${colorVal}`;
+        const sizeVal = document.getElementById('choice-text-size').value;
+        const colorTextVal = document.getElementById('choice-text-color').value;
+        const fontVal = document.getElementById('choice-font').value;
+
+        const blocks = document.querySelectorAll('#choice-items-container .choice-item-block');
+        if (blocks.length === 0) return alert("Adicione pelo menos uma pergunta.");
+        const itemsArray = [];
+        let problem = null;
+        blocks.forEach((block, index) => {
+            const questionHtml = sanitizeWordHtml(block.querySelector('.choice-item-question').innerHTML);
+            const choices = [...block.querySelectorAll('.choice-option-row')]
+                .map(row => ({ text: row.querySelector('.choice-option-text').value.trim(), correct: row.querySelector('.choice-option-check').checked }))
+                .filter(choice => choice.text);
+            if (problem) return;
+            if (!stripWordHtml(questionHtml).trim()) problem = `A pergunta ${index + 1} está sem texto.`;
+            else if (choices.length < 2) problem = `A pergunta ${index + 1} precisa de pelo menos duas alternativas.`;
+            else if (!choices.some(choice => choice.correct)) problem = `Marque a alternativa certa da pergunta ${index + 1}.`;
+            else if (choices.every(choice => choice.correct)) problem = `Na pergunta ${index + 1} todas as alternativas estão marcadas como certas.`;
+            itemsArray.push({ word: questionHtml, choices });
+        });
+        if (problem) return alert(problem);
+
+        const targetDoctorUserId = isDoctor ? currentUserId : null;
+        const targetCompanyId = isAdmin ? (document.getElementById('choice-exercise-target-company')?.value || null) : null;
+        saveChoiceExerciseToDB(finalTitle, sizeVal, colorTextVal, fontVal, itemsArray, targetDoctorUserId, targetCompanyId);
+        closeChoiceExerciseUpload();
     });
 
     document.getElementById('syllables-exercise-form').addEventListener('submit', (e) => {
@@ -7703,8 +7948,8 @@ function openGame(gameId) {
         // acesso e o tempo de uso são contados aqui fora, pelo
         // startUsageActivity logo abaixo, como em qualquer outro exercício.
         // O iframe recarrega a cada abertura, já com o conjunto escolhido no
-        // card (openMonteFraseDeck): começa do zero, com as frases numa ordem
-        // nova.
+        // card (openMonteFraseDeck): começa do zero, na ordem do cadastro (ou
+        // numa ordem sorteada, se o conjunto tiver o embaralhamento ligado).
         const frame = document.getElementById('monte-frase-frame');
         const deck = activeMonteFraseDeck;
         document.getElementById('game-monte-frase-container').style.display = 'flex';
@@ -7823,6 +8068,10 @@ function closeGame() {
     const elDictation = document.getElementById('game-dictation-container');
     if (elDictation) elDictation.style.display = 'none';
     activeDictationExercise = null;
+
+    const elChoice = document.getElementById('game-choice-container');
+    if (elChoice) elChoice.style.display = 'none';
+    activeChoiceExercise = null;
 
     document.getElementById('complete-sentence-frame')?.contentWindow?.postMessage({ type: 'complete-sentence:pause-audio' }, window.location.origin);
     document.getElementById('monte-frase-frame')?.contentWindow?.postMessage({ type: 'monte-frase:pause-audio' }, window.location.origin);
@@ -8623,6 +8872,242 @@ function setupDictationControls() {
     });
     document.getElementById('btn-dictation-retry').addEventListener('click', () => renderDictationPhrase(true));
     document.getElementById('btn-dictation-restart').addEventListener('click', startDictationRound);
+}
+
+// =============================================
+// ESCOLHA A RESPOSTA (tipo de exercício, game_kind 'choice') — a pessoa vê e
+// ouve a pergunta e toca na alternativa certa. Com uma certa, o toque já
+// confere; com mais de uma, ela escolhe quantas a pergunta pede e confere.
+// Cada resposta vira uma linha em activity_results (o que escolheu, acerto
+// em %, vezes que ouviu, tempo até o primeiro toque) — aba Evolução. Só grava
+// resposta de paciente logado (médico/admin testando não).
+// =============================================
+let choiceQuestions = []; // [{ html, text, choices: [{ text, correct }], needed }]
+let activeChoiceExercise = null;
+let choiceIndex = 0;
+let choiceSessionId = null;
+// Por pergunta desta rodada: acerto da 1ª tentativa, da última e quantas foram.
+let choiceOutcomes = [];
+let choiceAttempt = 1;
+let choiceListens = 0;
+let choiceStartedAt = 0;
+let choiceFirstTapAt = 0;
+let choiceSelected = new Set(); // índices das alternativas escolhidas
+let choiceAnswered = false;
+
+function openChoiceExercise(ex) {
+    const questions = (ex.items || []).map(item => {
+        const html = sanitizeWordHtml(item.word || '');
+        const choices = (item.choices || []).filter(choice => choice && choice.text);
+        return { html, text: stripWordHtml(html).trim(), choices, needed: choices.filter(choice => choice.correct).length };
+    }).filter(question => question.choices.length >= 2 && question.needed > 0);
+    if (!questions.length) return;
+    activeChoiceExercise = ex;
+    choiceQuestions = questions;
+
+    document.getElementById('grid-exercises').style.display = 'none';
+    document.getElementById('exercises-header').style.display = 'none';
+    document.getElementById('btn-exercises-back').style.display = 'flex';
+    document.getElementById('game-choice-container').style.display = 'flex';
+
+    const displayTitle = (ex.title || '').split('|')[0] || 'Escolha a Resposta';
+    document.getElementById('choice-deck-title').textContent = displayTitle;
+    const questionEl = document.getElementById('choice-question');
+    const size = parseInt(ex.syllablesSize, 10) || CHOICE_DEFAULT_TEXT_SIZE;
+    questionEl.style.fontSize = `min(${size}px, 9vw)`;
+    questionEl.style.color = ex.syllablesColor || '';
+    questionEl.style.fontFamily = ex.syllablesFont || '';
+    document.getElementById('choice-options').style.fontFamily = ex.syllablesFont || '';
+
+    startUsageActivity(displayTitle, {
+        key: `exercise:${ex.id || displayTitle}`,
+        group: 'Exercícios',
+        view: 'view-exercises',
+        detail: 'Exercício aberto'
+    });
+
+    startChoiceRound();
+}
+
+// Cada rodada (abrir ou "Fazer de novo") é uma sessão na aba Evolução.
+function startChoiceRound() {
+    choiceSessionId = makeUsageId('escolha');
+    choiceIndex = 0;
+    choiceOutcomes = [];
+    document.getElementById('choice-play').style.display = '';
+    document.getElementById('choice-summary').style.display = 'none';
+    renderChoiceQuestion();
+}
+
+// O que o 🔊 fala, em dois áudios com pausa no meio (speakInParts): a
+// pergunta e as alternativas ("de manhã, ou à tarde.").
+function choiceSpokenParts(question) {
+    const options = question.choices.map(choice => choice.text);
+    const last = options.pop();
+    const prompt = /[.?!:;…]$/.test(question.text) ? question.text : `${question.text}.`;
+    return [prompt, `${options.length ? `${options.join(', ')}, ou ${last}` : last}.`];
+}
+
+function renderChoiceQuestion(retry = false) {
+    const question = choiceQuestions[choiceIndex];
+    if (!question) return;
+    choiceAttempt = retry ? choiceAttempt + 1 : 1;
+    document.getElementById('choice-question').innerHTML = question.html;
+    document.getElementById('choice-progress').textContent = `${choiceIndex + 1} / ${choiceQuestions.length}`;
+    document.getElementById('choice-hint').textContent = question.needed > 1
+        ? `Escolha ${question.needed} respostas e toque em Conferir.`
+        : 'Toque na resposta certa.';
+
+    const optionsEl = document.getElementById('choice-options');
+    optionsEl.innerHTML = '';
+    question.choices.forEach((choice, index) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'choice-option';
+        btn.textContent = choice.text;
+        btn.setAttribute('aria-pressed', 'false');
+        btn.addEventListener('click', () => toggleChoiceOption(index));
+        optionsEl.appendChild(btn);
+    });
+
+    const feedback = document.getElementById('choice-feedback');
+    feedback.style.display = 'none';
+    feedback.innerHTML = '';
+    const checkBtn = document.getElementById('btn-choice-check');
+    checkBtn.style.display = question.needed > 1 ? '' : 'none';
+    checkBtn.disabled = true;
+    document.getElementById('btn-choice-next').style.display = 'none';
+    document.getElementById('btn-choice-retry').style.display = 'none';
+
+    choiceSelected = new Set();
+    choiceListens = 0;
+    choiceAnswered = false;
+    choiceStartedAt = Date.now();
+    choiceFirstTapAt = 0;
+    const nextQuestion = choiceQuestions[choiceIndex + 1];
+    if (nextQuestion && !retry) choiceSpokenParts(nextQuestion).forEach(prefetchTts);
+    playChoiceAudio();
+}
+
+function playChoiceAudio() {
+    const question = choiceQuestions[choiceIndex];
+    if (!question) return;
+    choiceListens += 1;
+    speakInParts(choiceSpokenParts(question));
+}
+
+function toggleChoiceOption(index) {
+    const question = choiceQuestions[choiceIndex];
+    if (!question || choiceAnswered) return;
+    if (!choiceFirstTapAt) choiceFirstTapAt = Date.now();
+    if (question.needed === 1) {
+        choiceSelected = new Set([index]);
+        return checkChoiceAnswer();
+    }
+    if (choiceSelected.has(index)) choiceSelected.delete(index);
+    else if (choiceSelected.size < question.needed) choiceSelected.add(index);
+    document.querySelectorAll('#choice-options .choice-option').forEach((btn, i) => {
+        btn.classList.toggle('is-selected', choiceSelected.has(i));
+        btn.setAttribute('aria-pressed', String(choiceSelected.has(i)));
+    });
+    document.getElementById('btn-choice-check').disabled = choiceSelected.size !== question.needed;
+}
+
+function checkChoiceAnswer() {
+    const question = choiceQuestions[choiceIndex];
+    if (!question || choiceAnswered || choiceSelected.size !== question.needed) return;
+    choiceAnswered = true;
+    const now = Date.now();
+    const chosen = [...choiceSelected].sort((a, b) => a - b);
+    const right = chosen.filter(index => question.choices[index].correct).length;
+    const result = {
+        accuracy: Math.round((100 * right) / question.needed),
+        wrong: chosen.length - right,
+        answer: chosen.map(index => question.choices[index].text).join(' + ')
+    };
+    const timing = {
+        seconds: Math.max(0, Math.round((now - choiceStartedAt) / 1000)),
+        firstTapMs: Math.max(0, (choiceFirstTapAt || now) - choiceStartedAt)
+    };
+    const outcome = choiceOutcomes[choiceIndex] || { first: result.accuracy, attempts: 0 };
+    outcome.last = result.accuracy;
+    outcome.attempts += 1;
+    choiceOutcomes[choiceIndex] = outcome;
+    logChoiceResult(question, result, timing);
+
+    // Marca só o que a pessoa escolheu (certo/errado): a resposta certa não
+    // aparece, pra o "Tentar de novo" continuar valendo.
+    document.querySelectorAll('#choice-options .choice-option').forEach((btn, index) => {
+        btn.disabled = true;
+        btn.classList.remove('is-selected');
+        if (choiceSelected.has(index)) btn.classList.add(question.choices[index].correct ? 'is-ok' : 'is-wrong');
+    });
+
+    const ok = result.accuracy === 100;
+    const feedback = document.getElementById('choice-feedback');
+    const title = document.createElement('strong');
+    title.className = 'dictation-feedback-title ' + (ok ? 'is-ok' : 'is-partial');
+    title.textContent = ok
+        ? (choiceAttempt > 1 ? 'Muito bem, agora está certo!' : 'Muito bem, está certo!')
+        : question.needed > 1 && right
+            ? `Você acertou ${right} de ${question.needed}. Pode tentar de novo ou seguir.`
+            : 'Não é essa. Pode tentar de novo ou seguir.';
+    feedback.innerHTML = '';
+    feedback.appendChild(title);
+    feedback.style.display = '';
+
+    document.getElementById('btn-choice-check').style.display = 'none';
+    const nextBtn = document.getElementById('btn-choice-next');
+    nextBtn.querySelector('span').textContent = choiceIndex >= choiceQuestions.length - 1 ? 'Ver resultado' : 'Próxima pergunta';
+    nextBtn.style.display = '';
+    const retryBtn = document.getElementById('btn-choice-retry');
+    retryBtn.style.display = ok ? 'none' : '';
+    (ok ? nextBtn : retryBtn).focus();
+}
+
+function logChoiceResult(question, result, timing) {
+    if (!supabaseClient || isAdmin || isDoctor || !currentPatientId) return;
+    supabaseClient.from('activity_results').insert([{
+        patient_id: currentPatientId,
+        activity: 'choice',
+        exercise_id: activeChoiceExercise?.fromSupabase ? activeChoiceExercise.id : null,
+        session_id: choiceSessionId,
+        item_text: question.text,
+        answer_text: result.answer,
+        accuracy: result.accuracy,
+        listens: choiceListens,
+        moves: result.wrong,
+        hints: 0,
+        seconds: timing.seconds,
+        first_key_ms: timing.firstTapMs,
+        attempt: choiceAttempt
+    }]).then(({ error }) => {
+        if (error) console.warn('Escolha a Resposta: não consegui registrar o resultado:', error);
+    });
+}
+
+function showChoiceSummary() {
+    document.getElementById('choice-play').style.display = 'none';
+    document.getElementById('choice-summary').style.display = '';
+    const outcomes = choiceOutcomes.filter(Boolean);
+    const total = outcomes.length;
+    const rightFirst = outcomes.filter(outcome => outcome.first === 100).length;
+    const fixedLater = outcomes.filter(outcome => outcome.first < 100 && outcome.last === 100).length;
+    let text = `Você acertou ${rightFirst} de ${total} ${total === 1 ? 'pergunta' : 'perguntas'} de primeira.`;
+    if (fixedLater) text += ` Refazendo, acertou mais ${fixedLater}.`;
+    document.getElementById('choice-summary-text').textContent = text;
+}
+
+function setupChoiceControls() {
+    document.getElementById('btn-choice-check').addEventListener('click', checkChoiceAnswer);
+    document.getElementById('btn-choice-listen').addEventListener('click', playChoiceAudio);
+    document.getElementById('btn-choice-next').addEventListener('click', () => {
+        if (choiceIndex >= choiceQuestions.length - 1) return showChoiceSummary();
+        choiceIndex += 1;
+        renderChoiceQuestion();
+    });
+    document.getElementById('btn-choice-retry').addEventListener('click', () => renderChoiceQuestion(true));
+    document.getElementById('btn-choice-restart').addEventListener('click', startChoiceRound);
 }
 
 // =============================================
@@ -16620,9 +17105,9 @@ async function openPatientExercisesModal(patient) {
 
         const label = document.createElement('span');
         label.textContent = displayTitle;
-        // Conjunto do Monte a Frase e Ditado têm nome livre ("teste", "Na
+        // Conjunto do Monte a Frase, Ditado e Escolha a Resposta têm nome livre ("teste", "Na
         // cozinha"): a etiqueta diz de que exercício se trata.
-        const kindTag = { 'monte-frase': 'Monte a Frase', dictation: 'Ditado' }[ex.game_kind];
+        const kindTag = { 'monte-frase': 'Monte a Frase', dictation: 'Ditado', choice: 'Escolha a Resposta' }[ex.game_kind];
         if (kindTag) {
             const tag = document.createElement('span');
             tag.className = 'release-kind-tag';
@@ -17317,7 +17802,7 @@ async function loadEvolutionTab(prefix) {
     document.getElementById(`btn-refresh-${prefix}-evolution`)?.addEventListener('click', refresh);
 });
 
-const EVOLUTION_ACTIVITY_NAMES = { 'monte-frase': 'Monte a Frase', dictation: 'Ditado' };
+const EVOLUTION_ACTIVITY_NAMES = { 'monte-frase': 'Monte a Frase', dictation: 'Ditado', choice: 'Escolha a Resposta' };
 
 async function renderPatientEvolution(body, patientUserId, activity = 'monte-frase') {
     if (!EVOLUTION_ACTIVITY_NAMES[activity]) activity = 'monte-frase';
@@ -17339,9 +17824,10 @@ async function renderPatientEvolution(body, patientUserId, activity = 'monte-fra
 
     const { data: rows, error } = await supabaseClient
         .from('activity_results')
-        .select(activity === 'dictation'
-            ? 'created_at, session_id, exercise_id, item_text, moves, hints, seconds, answer_text, accuracy, listens, first_key_ms, typing_ms, letter_errors, corrections, attempt'
-            : 'created_at, session_id, exercise_id, item_text, moves, hints, seconds')
+        .select({
+            dictation: 'created_at, session_id, exercise_id, item_text, moves, hints, seconds, answer_text, accuracy, listens, first_key_ms, typing_ms, letter_errors, corrections, attempt',
+            choice: 'created_at, session_id, exercise_id, item_text, moves, hints, seconds, answer_text, accuracy, listens, first_key_ms, attempt'
+        }[activity] || 'created_at, session_id, exercise_id, item_text, moves, hints, seconds')
         .eq('user_id', patientUserId)
         .eq('activity', activity)
         .order('created_at', { ascending: true })
@@ -17355,9 +17841,10 @@ async function renderPatientEvolution(body, patientUserId, activity = 'monte-fra
     if (!rows || !rows.length) {
         const empty = document.createElement('p');
         empty.className = 'media-hint';
-        empty.textContent = activity === 'dictation'
-            ? 'Ainda não há registros. Os resultados aparecem depois que o paciente escrever frases no Ditado.'
-            : 'Ainda não há registros. Os resultados aparecem depois que o paciente montar frases no Monte a Frase.';
+        empty.textContent = {
+            dictation: 'Ainda não há registros. Os resultados aparecem depois que o paciente escrever frases no Ditado.',
+            choice: 'Ainda não há registros. Os resultados aparecem depois que o paciente responder perguntas no Escolha a Resposta.'
+        }[activity] || 'Ainda não há registros. Os resultados aparecem depois que o paciente montar frases no Monte a Frase.';
         body.appendChild(empty);
         return;
     }
@@ -17367,9 +17854,10 @@ async function renderPatientEvolution(body, patientUserId, activity = 'monte-fra
     const deckIds = [...new Set(rows.map(row => row.exercise_id).filter(Boolean))];
     const details = document.createElement('div');
     const singleDeck = new Set(rows.map(row => row.exercise_id ?? null)).size < 2;
-    // Nome do conjunto: o filtro usa, e a planilha do Ditado também (mesmo com um só).
+    // Nome do conjunto: o filtro usa, e a planilha do Ditado e do Escolha a
+    // Resposta também (mesmo com um só).
     let decks = [];
-    if (deckIds.length && (!singleDeck || activity === 'dictation')) {
+    if (deckIds.length && (!singleDeck || activity === 'dictation' || activity === 'choice')) {
         ({ data: decks } = await supabaseClient.from('exercises').select('id, title').in('id', deckIds));
         if (body.dataset.requestId !== requestId) return;
     }
@@ -17402,6 +17890,7 @@ function renderEvolutionDetails(body, rows, activity = 'monte-frase', meta = {})
     if (patientEvolutionChart) { patientEvolutionChart.destroy(); patientEvolutionChart = null; }
     body.innerHTML = '';
     if (activity === 'dictation') return renderDictationEvolutionDetails(body, rows, meta);
+    if (activity === 'choice') return renderChoiceEvolutionDetails(body, rows, meta);
     const sessions = groupEvolutionSessions(rows);
     const totalSeconds = rows.reduce((sum, row) => sum + row.seconds, 0);
 
@@ -17506,8 +17995,26 @@ function averageOf(rows, key) {
 }
 const formatEvolutionOptionalAverage = value => (value == null ? '-' : formatEvolutionAverage(value));
 
-// Planilha do Ditado: uma linha por resposta. Ponto e vírgula e BOM pra o
-// Excel em português abrir com acentos e colunas certas.
+// Planilha da Evolução: ponto e vírgula e BOM pra o Excel em português
+// abrir com acentos e colunas certas.
+function downloadEvolutionCsv(filePrefix, header, lines, patientName) {
+    const cell = value => {
+        const text = String(value ?? '');
+        return /[;"\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const csv = '\ufeff' + [header, ...lines].map(line => line.map(cell).join(';')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    const slug = (patientName || 'paciente').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
+    link.href = url;
+    link.download = `${filePrefix}-${slug || 'paciente'}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Planilha do Ditado: uma linha por resposta.
 function downloadDictationCsv(rows, meta) {
     const header = ['Paciente', 'Exercício', 'Sessão', 'Data', 'Hora', 'Frase', 'Tentativa', 'O que escreveu', 'Acerto (%)',
         'Palavras com erro', 'Erros de letra', 'Correções (apagou)', 'Vezes que ouviu',
@@ -17524,20 +18031,7 @@ function downloadDictationCsv(rows, meta) {
             row.corrections ?? '', row.listens ?? '', seconds(row.first_key_ms), seconds(row.typing_ms), row.seconds
         ];
     });
-    const cell = value => {
-        const text = String(value ?? '');
-        return /[;"\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-    };
-    const csv = '\ufeff' + [header, ...lines].map(line => line.map(cell).join(';')).join('\r\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    const link = document.createElement('a');
-    const slug = (meta.patientName || 'paciente').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
-    link.href = url;
-    link.download = `ditado-${slug || 'paciente'}-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    downloadEvolutionCsv('ditado', header, lines, meta.patientName);
 }
 
 // Ditado: acerto médio por sessão, lista de sessões, todas as respostas (o
@@ -17669,6 +18163,119 @@ function renderDictationEvolutionDetails(body, rows, meta = {}) {
     appendEvolutionTitle(body, 'Frases com mais dificuldade');
     body.appendChild(evolutionTable(
         ['Frase', 'Vezes', 'Acerto (média)'],
+        hardest.map(item => [item.text, item.attempts, formatEvolutionPercent(item.accuracyAvg)])
+    ));
+}
+
+// Planilha do Escolha a Resposta: uma linha por resposta.
+function downloadChoiceCsv(rows, meta) {
+    const header = ['Paciente', 'Exercício', 'Sessão', 'Data', 'Hora', 'Pergunta', 'Tentativa', 'O que escolheu', 'Acerto (%)',
+        'Alternativas erradas', 'Vezes que ouviu', 'Até o primeiro toque (s)', 'Tempo na pergunta (s)'];
+    const sessionNumbers = new Map();
+    const seconds = ms => (ms == null ? '' : (ms / 1000).toFixed(1).replace('.', ','));
+    const lines = rows.map(row => {
+        if (!sessionNumbers.has(row.session_id)) sessionNumbers.set(row.session_id, sessionNumbers.size + 1);
+        const date = new Date(row.created_at);
+        return [
+            meta.patientName || '', meta.deckName ? meta.deckName(row.exercise_id) : '', sessionNumbers.get(row.session_id),
+            date.toLocaleDateString('pt-BR'), date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            row.item_text, row.attempt ?? 1, row.answer_text || '', row.accuracy ?? '', row.moves ?? '',
+            row.listens ?? '', seconds(row.first_key_ms), row.seconds
+        ];
+    });
+    downloadEvolutionCsv('escolha-a-resposta', header, lines, meta.patientName);
+}
+
+// Escolha a Resposta: mesma leitura do Ditado — médias, gráfico e "perguntas
+// com mais dificuldade" pela 1ª tentativa; a lista de respostas mostra todas.
+function renderChoiceEvolutionDetails(body, rows, meta = {}) {
+    const firstRows = rows.filter(isFirstDictationAttempt);
+    const sessions = groupEvolutionSessions(firstRows);
+    const retries = dictationRetryStats(rows);
+    const sessionSeconds = new Map();
+    rows.forEach(row => sessionSeconds.set(row.session_id, (sessionSeconds.get(row.session_id) || 0) + row.seconds));
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.className = 'admin-analytics-action evolution-export-btn';
+    exportBtn.innerHTML = '<i class="fas fa-file-arrow-down" aria-hidden="true"></i> Baixar planilha (CSV)';
+    exportBtn.addEventListener('click', () => downloadChoiceCsv(rows, meta));
+    body.appendChild(exportBtn);
+    const totalSeconds = rows.reduce((sum, row) => sum + row.seconds, 0);
+    const rightFirst = firstRows.filter(row => row.accuracy === 100).length;
+    const accuracyAvg = firstRows.length ? firstRows.reduce((sum, row) => sum + (row.accuracy || 0), 0) / firstRows.length : 0;
+
+    appendEvolutionSummary(body, [
+        [sessions.length, sessions.length === 1 ? 'sessão' : 'sessões'],
+        [firstRows.length, 'perguntas respondidas'],
+        [`${rightFirst} (${formatEvolutionPercent(accuracyAvg)})`, 'certas de primeira'],
+        [formatEvolutionDuration(totalSeconds), 'tempo total'],
+        [retries.retried, `perguntas refeitas (${retries.fixed} certas depois)`],
+        [formatEvolutionMs(averageOf(firstRows, 'first_key_ms')), 'até o primeiro toque (média)']
+    ]);
+
+    appendEvolutionTitle(body, 'Acerto médio na 1ª tentativa, em cada sessão (quanto maior, melhor)');
+    const chartWrap = document.createElement('div');
+    chartWrap.className = 'evolution-chart';
+    const canvas = document.createElement('canvas');
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', 'Gráfico do acerto médio por sessão no Escolha a Resposta; os mesmos números estão na tabela de sessões abaixo.');
+    chartWrap.appendChild(canvas);
+    body.appendChild(chartWrap);
+    renderEvolutionChart(canvas, sessions, {
+        series: [['Acerto médio (%)', '#2a78d6', session => session.accuracyAvg]],
+        yTitle: 'acerto (%)',
+        yMax: 100,
+        countLabel: 'Perguntas respondidas',
+        formatValue: formatEvolutionPercent
+    });
+
+    appendEvolutionTitle(body, 'Sessões');
+    body.appendChild(evolutionTable(
+        ['Data', 'Perguntas', 'Certas de primeira', 'Acerto médio', 'Refeitas (certas depois)', 'Ouviu (média)', 'Até o primeiro toque (média)', 'Tempo na atividade'],
+        [...sessions].reverse().map(session => [
+            new Date(session.startedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+            session.count,
+            session.perfect,
+            formatEvolutionPercent(session.accuracyAvg),
+            (stats => (stats ? `${stats.retried} (${stats.fixed})` : '0'))(retries.bySession.get(session.items[0].session_id)),
+            formatEvolutionAverage(session.listensAvg),
+            formatEvolutionMs(averageOf(session.items, 'first_key_ms')),
+            formatEvolutionDuration(sessionSeconds.get(session.items[0].session_id) || session.seconds)
+        ])
+    ));
+
+    appendEvolutionTitle(body, 'Respostas (mais recentes primeiro)');
+    const answersTable = body.appendChild(evolutionTable(
+        ['Data', 'Pergunta', 'Tentativa', 'O que escolheu', 'Acerto', 'Ouviu', 'Até o primeiro toque', 'Tempo na pergunta'],
+        [...rows].reverse().map(row => [
+            new Date(row.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }),
+            row.item_text,
+            `${row.attempt ?? 1}ª`,
+            row.answer_text || '',
+            row.accuracy == null ? '-' : `${row.accuracy}%`,
+            row.listens ?? '-',
+            formatEvolutionMs(row.first_key_ms),
+            formatEvolutionDuration(row.seconds)
+        ])
+    ));
+    answersTable.classList.add('evolution-table-scroll');
+
+    const byText = new Map();
+    firstRows.forEach(row => {
+        const entry = byText.get(row.item_text) || { attempts: 0, accuracy: 0 };
+        entry.attempts += 1;
+        entry.accuracy += row.accuracy || 0;
+        byText.set(row.item_text, entry);
+    });
+    const hardest = [...byText.entries()]
+        .map(([text, entry]) => ({ text, attempts: entry.attempts, accuracyAvg: entry.accuracy / entry.attempts }))
+        .filter(item => item.accuracyAvg < 100)
+        .sort((a, b) => a.accuracyAvg - b.accuracyAvg)
+        .slice(0, 8);
+    if (!hardest.length) return;
+    appendEvolutionTitle(body, 'Perguntas com mais dificuldade');
+    body.appendChild(evolutionTable(
+        ['Pergunta', 'Vezes', 'Acerto (média)'],
         hardest.map(item => [item.text, item.attempts, formatEvolutionPercent(item.accuracyAvg)])
     ));
 }

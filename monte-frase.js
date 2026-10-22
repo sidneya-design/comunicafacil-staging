@@ -53,6 +53,9 @@ const CARD_ROLE = "monte-frase-card";
 const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
 const access = { remote: false, role: null, userId: null, patientId: null, canManage: false, blocked: null, deck: null };
+// Frases na ordem do cadastro, a não ser que o conjunto peça sorteio
+// (shuffle_items = true).
+let shuffleOrder = false;
 let supabase = null;
 let sentences = [];
 
@@ -114,12 +117,13 @@ async function initAccess() {
         // A RLS só devolve o conjunto pra quem pode vê-lo (paciente: só se o
         // médico liberou).
         const { data: deck } = await supabase.from("exercises")
-            .select("id, title, doctor_user_id, company_id").eq("id", deckId).eq("game_kind", GAME_ID).maybeSingle();
+            .select("*").eq("id", deckId).eq("game_kind", GAME_ID).maybeSingle();
         if (!deck) {
             access.blocked = "Este exercício ainda não foi liberado para você. Fale com o seu médico.";
             return;
         }
         access.deck = deck;
+        shuffleOrder = deck.shuffle_items === true;
 
         if (access.role === "admin") {
             access.canManage = true;
@@ -132,7 +136,7 @@ async function initAccess() {
             access.patientId = patientRow?.id || null;
         }
 
-        const { data: items, error } = await supabase.from("exercise_items").select("id, role, link").eq("exercise_id", deck.id);
+        const { data: items, error } = await supabase.from("exercise_items").select("id, role, link").eq("exercise_id", deck.id).order("id", { ascending: true });
         if (error) throw error;
         sentences = parseRemoteItems(items);
     } catch (error) {
@@ -721,10 +725,15 @@ function renderSummary() {
 
 // Recomeça a lista de frases do início (entrada, "Recomeçar" e mudança no cadastro).
 // Ordem das frases sorteada a cada início, e nunca igual à da vez anterior
-// (com uma frase só, não tem o que trocar).
+// (com uma frase só, não tem o que trocar) — só nos conjuntos com o
+// embaralhamento ligado; nos demais (o padrão), fica a ordem do cadastro.
 let lastSentenceOrder = "";
 
 function shuffleSentences() {
+    if (!shuffleOrder) {
+        levels[1] = buildLevels()[1];
+        return;
+    }
     const list = levels[1];
     let shuffled = list;
     for (let attempt = 0; attempt < 10; attempt += 1) {
